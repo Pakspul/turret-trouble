@@ -1,0 +1,72 @@
+name: Deploy to Azure Static Web Apps
+
+# The game is fully client-side, so Static Web Apps serves `public/` directly
+# and `server.js` is never executed in production - it stays for local dev.
+#
+# Requires one repository secret: AZURE_STATIC_WEB_APPS_API_TOKEN
+# (Azure portal -> the Static Web App -> Overview -> Manage deployment token).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write # lets the action comment the preview URL on the PR
+
+jobs:
+  build-and-deploy:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
+      url: ${{ steps.deploy.outputs.static_web_app_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+
+      # No dependencies to install - the server is zero-dep and the game is
+      # plain ES modules, so these steps just fail the build on a broken
+      # commit rather than deploying one.
+      - name: Syntax check
+        run: npm run check
+
+      - name: Smoke test
+        run: npm test
+
+      # app_location is `public`, so `archive/`, `test/`, `server.js` and
+      # `web.config` are never uploaded - the same isolation ROOT gives
+      # server.js locally. skip_app_build is on because there is no build.
+      - name: Deploy to Azure Static Web Apps
+        id: deploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: 'public'
+          api_location: ''
+          output_location: ''
+          skip_app_build: true
+
+  close-preview:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    name: Close preview environment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Tear down the PR staging environment
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: close

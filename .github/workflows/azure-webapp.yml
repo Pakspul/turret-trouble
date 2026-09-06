@@ -1,8 +1,13 @@
-name: Deploy to Azure Web App
+name: Deploy to Azure Web App (manual)
+
+# Alternative host. Azure Static Web Apps is the default path - see
+# azure-static-web-apps.yml - so this one no longer runs on push, otherwise
+# two workflows would deploy the same commit to two places on every merge.
+# Run it by hand from Actions -> Run workflow if you want the App Service
+# deployment; it is the only one of the two that actually runs server.js and
+# therefore serves /healthz.
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 env:
