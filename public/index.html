@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="description" content="Turret Trouble - a grid tower-defence game with a permanent Foundry upgrade tree.">
+<meta name="theme-color" content="#0c1116">
+<title>Turret Trouble</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div id="app">
+  <div id="stage"><canvas id="cv"></canvas></div>
+
+  <aside id="panel">
+    <div class="readout"><span class="k">wave</span><span class="v" id="waveNo">1</span></div>
+    <div class="readout"><span class="k">gold</span><span class="v" id="gold">0</span></div>
+    <div class="readout"><span class="k">score</span><span class="v" id="score">0</span></div>
+    <div class="readout"><span class="k">breaches left</span><span id="lives">♥♥♥</span></div>
+    <div id="devTag" class="devtag hidden">dev mode · shift+D</div>
+    <hr>
+
+    <div class="shop" id="shop"></div>
+
+    <div id="sel" class="hidden"></div>
+    <div id="recon" class="hidden"></div>
+
+    <div class="spacer"></div>
+
+    <button class="btn go" id="btnWave">Send wave 1</button>
+    <div class="row">
+      <button class="btn" id="btnPause">Pause</button>
+      <button class="btn" id="btnSpeed">1×</button>
+    </div>
+    <button class="btn foundry" id="btnFoundry">Foundry <b id="cores">0</b> ◈</button>
+    <div class="row">
+      <button class="btn warn" id="btnClear">Clear grid</button>
+      <button class="btn tiny" id="btnMenu">Menu</button>
+    </div>
+    <div class="row">
+      <button class="btn tiny" id="btnMute">Sound on</button>
+      <button class="btn tiny" id="btnFs">Full screen</button>
+    </div>
+  </aside>
+</div>
+
+<!-- portrait guard -->
+<div class="veil" id="rotate">
+  <svg class="rot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+    <rect x="7" y="2" width="10" height="20" rx="2"/>
+    <path d="M3 14a9 9 0 0 0 4 5M21 10a9 9 0 0 0-4-5"/>
+  </svg>
+  <h1>Turn your phone sideways</h1>
+  <p>Turret Trouble runs in landscape. Rotate to start defending.</p>
+</div>
+
+<!-- title screen -->
+<div class="veil" id="start">
+  <div class="mark">TURRET<span>TROUBLE</span></div>
+  <p>Hold the grid. Every kill pays gold for this run and points for the next one.
+     Spend those points in the Foundry to start richer, hit harder, and unlock new towers.</p>
+  <div class="stats">
+    <div><b id="startBest">0</b><span>best wave</span></div>
+    <div><b id="startCores">0</b><span>cores banked</span></div>
+    <div><b id="startRuns">0</b><span>runs</span></div>
+  </div>
+  <div class="veilRow">
+    <button class="btn go big" id="btnPlay">Start defending</button>
+    <button class="btn big" id="btnStartFoundry">Foundry</button>
+  </div>
+  <p class="fine hidden" id="warnStore">Storage is blocked in this browser, so progress will not survive a reload.</p>
+</div>
+
+<!-- run summary -->
+<div class="veil hidden" id="over">
+  <p id="overLead">The line broke.</p>
+  <div class="figure" id="overWave">0</div>
+  <p>waves held · best <b id="overBest">0</b></p>
+  <div class="stats">
+    <div><b id="overScore">0</b><span>points this run</span></div>
+    <div><b id="overKills">0</b><span>kills</span></div>
+    <div><b id="overCores">0</b><span>cores banked</span></div>
+  </div>
+  <div class="veilRow">
+    <button class="btn go big" id="btnAgain">Defend again</button>
+    <button class="btn big" id="btnOverFoundry">Foundry</button>
+  </div>
+</div>
+
+<!-- the Foundry -->
+<div class="veil sheet hidden" id="foundry">
+  <header>
+    <div class="ftitle">
+      <h1>Foundry</h1>
+      <span>Permanent upgrades, paid for with the points you score.</span>
+    </div>
+    <div class="fbank"><b id="fCores">0</b><span>cores ◈</span></div>
+    <button class="btn" id="fClose">Close</button>
+  </header>
+
+  <nav class="tabs" id="fTabs"></nav>
+
+  <div class="fgrid" id="fGrid"></div>
+
+  <footer>
+    <div class="fstats">
+      <span>best wave <b id="fBest">0</b></span>
+      <span>lifetime kills <b id="fKills">0</b></span>
+      <span>lifetime points <b id="fLifetime">0</b></span>
+    </div>
+    <button class="btn warn tiny" id="fWipe">Reset progress</button>
+  </footer>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

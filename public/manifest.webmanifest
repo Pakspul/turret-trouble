@@ -1,0 +1,19 @@
+{
+  "name": "Turret Trouble",
+  "short_name": "Turret Trouble",
+  "description": "A grid tower-defence game with a permanent Foundry upgrade tree.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0c1116",
+  "theme_color": "#0c1116",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

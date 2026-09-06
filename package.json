@@ -1,0 +1,21 @@
+{
+  "name": "turret-trouble",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Turret Trouble - a grid tower-defence game with persistent Foundry progression.",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "dev:local": "node -e \"process.env.PORT = process.env.PORT || '3000'; require('./server.js')\"",
+    "test": "node test/smoke.mjs",
+    "check": "node --check server.js && node --check public/js/config.js && node --check public/js/game.js && node --check public/js/render.js && node --check public/js/ui.js && node --check public/js/main.js && node --check public/js/meta.js && node --check public/js/field.js && node --check public/js/waves.js && node --check public/js/audio.js && node --check public/js/storage.js",
+    "balance": "node test/balance.mjs"
+  },
+  "author": "",
+  "license": "MIT"
+}
