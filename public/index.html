@@ -28,6 +28,17 @@
     <div id="sel" class="hidden"></div>
     <div id="recon" class="hidden"></div>
 
+    <div id="replay" class="hidden">
+      <div class="hd">Replaying <b id="rName">build</b></div>
+      <div class="bar"><i id="rBar"></i></div>
+      <div class="line" id="rLine"></div>
+      <div class="pair">
+        <button class="btn tiny" id="rHold">Pause</button>
+        <button class="btn tiny" id="rSkip">Skip</button>
+        <button class="btn tiny warn" id="rStop">Stop</button>
+      </div>
+    </div>
+
     <div class="spacer"></div>
 
     <button class="btn go" id="btnWave">Send wave 1</button>
@@ -36,6 +47,7 @@
       <button class="btn" id="btnSpeed">1×</button>
     </div>
     <button class="btn foundry" id="btnFoundry">Foundry <b id="cores">0</b> ◈</button>
+    <button class="btn tape" id="btnTapes">Blueprints <b id="tapeTally">0</b></button>
     <div class="row">
       <button class="btn warn" id="btnClear">Clear grid</button>
       <button class="btn tiny" id="btnMenu">Menu</button>
@@ -70,7 +82,9 @@
   <div class="veilRow">
     <button class="btn go big" id="btnPlay">Start defending</button>
     <button class="btn big" id="btnStartFoundry">Foundry</button>
+    <button class="btn big" id="btnStartTapes">Blueprints</button>
   </div>
+  <p class="armed hidden" id="startArmed"></p>
   <p class="fine hidden" id="warnStore">Storage is blocked in this browser, so progress will not survive a reload.</p>
 </div>
 
@@ -86,8 +100,10 @@
   </div>
   <div class="veilRow">
     <button class="btn go big" id="btnAgain">Defend again</button>
+    <button class="btn big hidden" id="btnOverReplay">Replay this build</button>
     <button class="btn big" id="btnOverFoundry">Foundry</button>
   </div>
+  <p class="armed hidden" id="overArmed"></p>
 </div>
 
 <!-- the Foundry -->
@@ -112,6 +128,27 @@
       <span>lifetime points <b id="fLifetime">0</b></span>
     </div>
     <button class="btn warn tiny" id="fWipe">Reset progress</button>
+  </footer>
+</div>
+
+<!-- recorded build orders -->
+<div class="veil sheet hidden" id="tapes">
+  <header>
+    <div class="ftitle">
+      <h1>Blueprints</h1>
+      <span>Recorded build orders. Replay one and the opening builds itself.</span>
+    </div>
+    <div class="fbank"><b id="tSaved">0</b><span>saved</span></div>
+    <button class="btn" id="tClose">Close</button>
+  </header>
+
+  <div class="fgrid" id="tList"></div>
+
+  <footer>
+    <div class="fstats"><span id="tNow">Nothing recorded yet this run.</span></div>
+    <button class="btn tiny" id="tKeep">Keep this run</button>
+    <button class="btn tiny" id="tImport">Import</button>
+    <button class="btn warn tiny" id="tWipe">Delete all</button>
   </footer>
 </div>
 

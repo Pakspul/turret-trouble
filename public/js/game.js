@@ -12,6 +12,7 @@ import {
 import { field, solve, commit, legal, reset as resetField } from './field.js';
 import { buildWave } from './waves.js';
 import * as meta from './meta.js';
+import * as recorder from './recorder.js';
 import { sfx } from './audio.js';
 
 export const S = {
@@ -79,6 +80,9 @@ export function newRun() {
   S.foes = []; S.shots = []; S.blasts = []; S.arcs = []; S.motes = []; S.notes = [];
   S.picked = null; S.selected = null; S.hover = -1;
   S.shake = 0; S.waveFlash = 0; S.warn = 0;
+  // Starts a fresh tape, and hands the opening to the autopilot if a
+  // blueprint has been armed.
+  recorder.beginRun();
   touch();
 }
 
@@ -87,7 +91,13 @@ function gameOver() {
   S.paused = false;
   meta.noteRunEnd(S.wavesCleared, S.score);
   meta.persistNow();
+  endRecording();
   touch();
+}
+
+/** Bank the build order of the run that just finished. */
+export function endRecording() {
+  return recorder.endRun({ waves: S.wavesCleared, score: S.score, kills: S.kills });
 }
 
 /* ── waves ────────────────────────────────────────────────────────────── */
@@ -481,6 +491,7 @@ export function place(i, key) {
 
   sfx.place();
   S.selected = null;
+  recorder.note({ op: 'place', i, k: key });
   touch();
   return true;
 }
@@ -515,6 +526,7 @@ export function convert(t, key) {
 
   if (net < 0) note(px(cx(t.i) + 0.5), py(cy(t.i) + 0.5), '+' + (-net), '#ffd76b');
   sfx.place();
+  recorder.note({ op: 'swap', i: t.i, k: key });
   touch();
   return true;
 }
@@ -529,6 +541,7 @@ export function sell(t) {
   for (const e of S.foes) e.to = null;
   S.selected = null;
   sfx.sell();
+  recorder.note({ op: 'sell', i: t.i, k: t.k });
   touch();
 }
 
@@ -546,6 +559,7 @@ export function upgrade(t) {
   t.spent += cost;
   t.l++;
   sfx.upgrade();
+  recorder.note({ op: 'up', i: t.i, k: t.k, l: t.l });
   touch();
 }
 
@@ -562,6 +576,7 @@ export function clearGrid() {
   for (const e of S.foes) e.to = null;
   S.selected = null;
   sfx.sell();
+  recorder.note({ op: 'clear' });
   touch();
 }
 
@@ -604,6 +619,10 @@ export function update(dt) {
   S.shake = Math.max(0, S.shake - dt * 2.5);
   S.waveFlash = Math.max(0, S.waveFlash - dt);
   S.warn = Math.max(0, S.warn - dt);
+
+  // A replaying blueprint builds through the same entry points the player's
+  // clicks go through, so everything the autopilot does is recorded too.
+  recorder.tick(dt);
 
   if (S.phase === 'run') {
     for (let n = S.queue.length - 1; n >= 0; n--) {
@@ -653,3 +672,11 @@ export function update(dt) {
 
   S.foes = S.foes.filter(e => !e.dead);
 }
+
+/* ── the recorder's view of the simulation ───────────────────────────────
+   Handed over once, at load. recorder.js never imports this module back, so
+   the dependency arrow still only points one way.                        */
+recorder.bindGame({
+  S, place, convert, upgrade, sell, clearGrid,
+  buildCost, convertCost, upgradeCost
+});

@@ -12,8 +12,8 @@
     "start": "node server.js",
     "dev": "node server.js",
     "dev:local": "node -e \"process.env.PORT = process.env.PORT || '3000'; require('./server.js')\"",
-    "test": "node test/smoke.mjs",
-    "check": "node --check server.js && node --check public/js/config.js && node --check public/js/game.js && node --check public/js/render.js && node --check public/js/ui.js && node --check public/js/main.js && node --check public/js/meta.js && node --check public/js/field.js && node --check public/js/waves.js && node --check public/js/audio.js && node --check public/js/storage.js",
+    "test": "node test/smoke.mjs && node test/recorder.mjs",
+    "check": "node --check server.js && node --check public/js/config.js && node --check public/js/game.js && node --check public/js/render.js && node --check public/js/ui.js && node --check public/js/main.js && node --check public/js/meta.js && node --check public/js/field.js && node --check public/js/waves.js && node --check public/js/audio.js && node --check public/js/storage.js && node --check public/js/recorder.js",
     "balance": "node test/balance.mjs"
   },
   "author": "",

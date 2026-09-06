@@ -21,10 +21,12 @@ tower types.
   Repositioning is free; only the escalating price of *new* turrets costs you.
 - **Send wave** early for a bonus, or let the break timer run out.
 - **Foundry** spends banked points. It pauses the run while it is open.
+- **Blueprints** replays a build you have already worked out, so a run that
+  ended badly does not have to be re-clicked from scratch.
 
 Keyboard: `1`–`5` pick a tower, `space` sends a wave, `P` pauses, `F` opens the
-Foundry, `Esc` clears the selection or closes the Foundry, `Shift+D` toggles
-developer mode.
+Foundry, `B` opens Blueprints, `Esc` clears the selection or closes whichever
+sheet is open, `Shift+D` toggles developer mode.
 
 ### Two currencies
 
@@ -84,6 +86,39 @@ Twenty-four upgrade nodes across four branches:
 Progress lives in `localStorage` under `turret-trouble:profile:v1`. "Reset
 progress" in the Foundry footer wipes it.
 
+### Blueprints
+
+The opening of a run is the same every time, so the game records it for you.
+Every placement, swap, upgrade and sale goes onto a tape tagged with the wave
+it happened on, and when the run ends — broken or abandoned — the tape is saved
+as a **blueprint**. **Replay this build** on the summary screen, or `B` for the
+library, hands that build order back to an autopilot on your next run.
+
+A replay is a build order, not a recording of a match. Waves are random, so the
+same clicks never produce the same run twice; what a blueprint reproduces is
+*what you built, where, and how deep into the run*:
+
+- A step never runs before the wave it was recorded on. Building at wave 12
+  still happens at wave 12.
+- Steps run in order and wait for the gold, exactly as your hands did. The
+  panel says what it is saving for, and **Skip** jumps a step you no longer
+  want to pay for.
+- A step the board cannot take — a locked tower, a cell already occupied, a
+  placement that would seal the exit — is skipped after a few seconds rather
+  than stalling the rest of the build.
+- Anything you do by hand mid-replay is recorded too, so a replay you extend
+  saves as the longer blueprint. **Pause** and **Stop** hand the board back at
+  any point.
+
+The library keeps twelve blueprints. The five most recent runs are kept
+automatically and pruned as new ones arrive; **Pin** takes one out of that
+rotation for good. **Copy** puts a blueprint on the clipboard as JSON and
+**Import** takes one back, so a build can move between browsers.
+
+Blueprints live in `localStorage` under `turret-trouble:blueprints:v1`, separate
+from the Foundry profile — resetting progress leaves your builds alone, and
+"Delete all" in the blueprint footer wipes those without touching your Cores.
+
 ## Running locally
 
 ```bash
@@ -111,7 +146,7 @@ better outcome.
 
 ```bash
 npm run check   # parse every module
-npm test        # headless simulation: economy, pathing, unlocks, persistence
+npm test        # headless: economy, pathing, unlocks, persistence, replay
 npm run balance # headless balance probe, prints the per-wave curve
 ```
 
@@ -122,11 +157,13 @@ server.js                 static file server (the only Node code)
 web.config                IIS/iisnode config, Windows App Service only
 public/
   index.html              markup shell
+  staticwebapp.config.json  Azure Static Web Apps routing, MIME and cache rules
   css/styles.css
   js/
     config.js             grid constants, tower/enemy/Foundry catalogues
     storage.js            localStorage wrapper with an in-memory fallback
     meta.js               Foundry state and the derived modifier bundle
+    recorder.js           build-order tapes, the blueprint library, replay
     field.js              grid occupancy and the BFS flow field
     waves.js              wave composition
     audio.js              synthesised sound cues
@@ -137,15 +174,26 @@ public/
     package.json          marks the folder as ESM for Node tooling
 test/
   smoke.mjs               headless run of the simulation, no DOM required
+  recorder.mjs            headless test of recording, replay and its limits
   balance.mjs             plays a full run and prints the economy curve
 archive/
   grid-siege-v1.html      the original single-file version, kept for reference
 ```
 
-The dependency direction is one-way: `config` → `field`/`meta` → `game` →
-`render`/`ui` → `main`. `game.js` never touches the DOM; it exposes a single
+The dependency direction is one-way: `config` → `field`/`meta`/`recorder` →
+`game` → `render`/`ui` → `main`. `recorder.js` never imports the simulation:
+`game.js` hands itself over with `bindGame()`, the same trick `bindProjection()`
+uses for the renderer. `game.js` never touches the DOM; it exposes a single
 `S.onChange` hook that `main.js` points at the UI.
 
 ## Deploying
 
-See [DEPLOY.md](DEPLOY.md) for Azure Web App setup.
+Every push to `main` deploys to **Azure Static Web Apps** — the game is
+entirely client-side, so `public/` is the whole deployment and `server.js`
+never runs in production. Setup needs one secret and takes about five minutes.
+
+An **Azure App Service** path is also wired up, for the case where you want
+`server.js` actually running (health probe, room for server-side code). It is
+manual-trigger only so the two do not race.
+
+See [DEPLOY.md](DEPLOY.md) for both.

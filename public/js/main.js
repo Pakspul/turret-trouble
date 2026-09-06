@@ -3,16 +3,18 @@
    actions the UI needs to drive.                                        */
 
 import { field } from './field.js';
-import { S, newRun, startWave, place, clearGrid, update, cycleSpeed } from './game.js';
+import { S, newRun, startWave, place, clearGrid, update, cycleSpeed, endRecording } from './game.js';
 import * as render from './render.js';
 import * as ui from './ui.js';
 import * as meta from './meta.js';
+import * as recorder from './recorder.js';
 import * as audio from './audio.js';
 
 const canvas = document.getElementById('cv');
 const stage = document.getElementById('stage');
 
 meta.init();
+recorder.init();
 render.init(canvas, stage);
 
 // The simulation fires onChange on every kill, so coalesce to one DOM pass
@@ -46,10 +48,31 @@ ui.actions.toggleDev = () => setDev(!S.dev);
 ui.actions.abandon = () => {
   if (S.phase !== 'menu' && S.phase !== 'dead') {
     meta.noteRunEnd(S.wavesCleared, S.score);
+    // Walking away from a run still banks its build order.
+    endRecording();
   }
   S.phase = 'menu';
   S.paused = false;
   ui.showStart();
+  ui.sync();
+};
+
+/**
+ * Replay a blueprint. A run that has not started yet can pick it up on the
+ * spot; anything further along waits for the next run rather than dropping
+ * an autopilot into the middle of a board it did not build.
+ */
+ui.actions.replay = id => {
+  recorder.arm(id);
+  ui.closeTapes();
+
+  if (S.phase === 'menu' || S.phase === 'dead') { ui.actions.play(); return; }
+  if (S.wave === 0 && !field.grid.some(Boolean)) {
+    const armed = recorder.rec.armed;
+    recorder.disarm();
+    recorder.startPlayback(armed);
+  }
+  ui.syncArmed();
   ui.sync();
 };
 
@@ -142,7 +165,12 @@ ui.showStart();
 ui.sync();
 requestAnimationFrame(frame);
 
-addEventListener('pagehide', () => meta.persistNow());
+function flush() {
+  meta.persistNow();
+  recorder.persistNow();
+}
+
+addEventListener('pagehide', flush);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') meta.persistNow();
+  if (document.visibilityState === 'hidden') flush();
 });

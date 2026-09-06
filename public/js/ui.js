@@ -10,6 +10,7 @@ import {
 } from './game.js';
 import { summarise } from './waves.js';
 import * as meta from './meta.js';
+import * as recorder from './recorder.js';
 import * as audio from './audio.js';
 import * as store from './storage.js';
 
@@ -24,7 +25,9 @@ export const actions = {
   togglePause: () => {},
   cycleSpeed: () => {},
   toggleDev: () => {},
-  abandon: () => {}
+  abandon: () => {},
+  /** Replay a saved blueprint: now if the board is still empty, else next run. */
+  replay: () => {}
 };
 
 const GLYPHS = {
@@ -182,6 +185,34 @@ function syncRecon() {
   box.innerHTML = `<div class="hd">Wave ${S.wave + 1} inbound</div><div class="chips">${rows}</div>`;
 }
 
+/* ── the replay readout ───────────────────────────────────────────────────
+   The buttons here are built once and only ever relabelled: rebuilding the
+   markup under a finger that is mid-press would swallow the click.       */
+let replaySig = '';
+
+function syncReplay() {
+  const box = el('replay');
+  const p = recorder.rec.play;
+  if (!p) { box.classList.add('hidden'); replaySig = ''; return; }
+  box.classList.remove('hidden');
+
+  const sig = `${p.at}|${p.status}|${p.need}|${p.done}|${p.skipped}|${p.paused}`;
+  if (sig === replaySig) return;
+  replaySig = sig;
+
+  const settled = p.done + p.skipped;
+  el('rName').textContent = p.name;
+  el('rBar').style.width = Math.round(100 * settled / Math.max(1, p.total)) + '%';
+  el('rLine').textContent = recorder.playbackLine();
+  el('rHold').textContent = p.paused ? 'Resume' : 'Pause';
+  el('rHold').disabled = p.status === 'done';
+  el('rSkip').disabled = p.status === 'done';
+
+  for (const state of ['wait', 'hold', 'done']) {
+    box.classList.toggle(state, p.status === state);
+  }
+}
+
 export function syncSpeed() {
   const btn = el('btnSpeed');
   btn.textContent = S.speed + '×';
@@ -220,9 +251,12 @@ export function sync() {
   syncShop();
   syncSelection();
   syncRecon();
+  syncReplay();
   syncWaveButton();
   syncSpeed();
+  syncTapeButton();
   if (!el('foundry').classList.contains('hidden')) syncFoundry();
+  if (!el('tapes').classList.contains('hidden')) syncTapes();
 }
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
@@ -232,6 +266,17 @@ export function showStart() {
   el('startRuns').textContent = meta.profile.stats.runs;
   el('start').classList.remove('hidden');
   el('over').classList.add('hidden');
+  syncArmed();
+}
+
+/** Says which blueprint the next run will replay, on both overlays. */
+export function syncArmed() {
+  const bp = recorder.rec.armed ? recorder.find(recorder.rec.armed) : null;
+  const text = bp ? `Next run replays “${bp.name}” · ${bp.steps.length} steps` : '';
+  for (const id of ['startArmed', 'overArmed']) {
+    el(id).textContent = text;
+    el(id).classList.toggle('hidden', !bp);
+  }
 }
 
 export function hideStart() {
@@ -247,7 +292,18 @@ export function showGameOver() {
   el('overLead').textContent = S.wavesCleared <= 3
     ? 'The line broke early. Bank the points and come back stronger.'
     : 'The line broke. Your points are already banked.';
+
+  // The run just recorded itself; offer it straight back as a build order.
+  const bp = recorder.rec.last;
+  const replay = el('btnOverReplay');
+  replay.classList.toggle('hidden', !bp);
+  if (bp) {
+    replay.textContent = `Replay this build (${bp.steps.length})`;
+    replay.title = `${bp.name} · saved to Blueprints`;
+  }
+
   el('over').classList.remove('hidden');
+  syncArmed();
 }
 
 /* ── the Foundry ──────────────────────────────────────────────────────── */
@@ -367,10 +423,180 @@ function nodeCard(node) {
   return card;
 }
 
+/* ── the blueprint sheet ──────────────────────────────────────────────────
+   The library of recorded build orders: replay one, pin the good ones, and
+   pass them around as JSON.                                              */
+let resumeAfterTapes = false;
+
+export function openTapes() {
+  resumeAfterTapes = S.phase === 'run' || S.phase === 'break';
+  if (resumeAfterTapes) S.paused = true;
+  el('tapes').classList.remove('hidden');
+  syncTapes();
+}
+
+export function closeTapes() {
+  el('tapes').classList.add('hidden');
+  if (resumeAfterTapes) S.paused = false;
+  resumeAfterTapes = false;
+  el('btnPause').textContent = S.paused ? 'Resume' : 'Pause';
+  sync();
+}
+
+function syncTapeButton() {
+  const btn = el('btnTapes');
+  const playing = !!recorder.rec.play;
+  el('tapeTally').textContent = playing
+    ? `${recorder.rec.play.done}/${recorder.rec.play.total}`
+    : recorder.library.list.length;
+  btn.classList.toggle('live', playing);
+}
+
+let tapeSig = '';
+
+function syncTapes() {
+  const list = el('tList');
+  el('tSaved').textContent = recorder.library.list.length;
+
+  const steps = recorder.rec.tape.length;
+  el('tNow').textContent = steps
+    ? `This run: ${steps} step${steps === 1 ? '' : 's'} recorded, up to wave ${Math.max(1, S.wave)}`
+    : 'Nothing recorded yet this run.';
+  el('tKeep').disabled = steps < 1;
+
+  const playing = recorder.rec.play;
+  const sig = [
+    recorder.revision.n,
+    recorder.library.list.length,
+    recorder.rec.armed,
+    playing ? playing.id : ''
+  ].join('|');
+  if (sig === tapeSig) return;
+  tapeSig = sig;
+
+  list.textContent = '';
+  if (!recorder.library.list.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent =
+      'No blueprints yet. Every run records itself - play one out and it lands here when it ends.';
+    list.appendChild(empty);
+    return;
+  }
+  for (const bp of recorder.library.list) list.appendChild(tapeCard(bp));
+}
+
+function tapeCard(bp) {
+  const card = document.createElement('div');
+  card.className = 'bp';
+  card.dataset.id = bp.id;
+  card.classList.toggle('pinned', bp.pinned);
+  const live = recorder.rec.play && recorder.rec.play.id === bp.id;
+  card.classList.toggle('live', !!live);
+
+  const armed = recorder.rec.armed === bp.id;
+  const towers = recorder.summarise(bp.steps)
+    .map(([k, n]) => `<span class="chip" style="--c:${TOWERS[k].color}">${TOWERS[k].name}<b>${n}</b></span>`)
+    .join('');
+
+  const when = new Date(bp.created).toLocaleString(undefined, {
+    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+  });
+
+  const flags = [
+    bp.pinned ? 'pinned' : null,
+    live ? 'replaying now' : armed ? 'armed for next run' : null
+  ].filter(Boolean).join(' · ');
+
+  card.innerHTML =
+    `<div class="bh">
+       <span class="bn">${escapeText(bp.name)}</span>
+       <span class="bw">wave ${bp.waves || recorder.lastWave(bp.steps)}</span>
+     </div>
+     <div class="bm">${bp.steps.length} steps · ${when}${flags ? ' · ' + flags : ''}</div>
+     <div class="chips">${towers}</div>
+     <div class="brow">
+       <button class="btn tiny go" data-a="play">${armed ? 'Armed' : 'Replay'}</button>
+       <button class="btn tiny" data-a="pin">${bp.pinned ? 'Unpin' : 'Pin'}</button>
+       <button class="btn tiny" data-a="rename">Rename</button>
+       <button class="btn tiny" data-a="copy">Copy</button>
+       <button class="btn tiny warn" data-a="del">Delete</button>
+     </div>
+     <details><summary>${bp.steps.length} steps</summary><ol>${stepList(bp.steps)}</ol></details>`;
+
+  return card;
+}
+
+/** Long tapes are trimmed: the opening is the part worth reading. */
+const STEP_PREVIEW = 80;
+
+function stepList(steps) {
+  let shown = null;
+  const rows = steps.slice(0, STEP_PREVIEW).map(s => {
+    // Anything built before wave 1 was sent still reads as wave 1, and the
+    // wave only needs saying where it changes; the rest is one block.
+    const wave = Math.max(1, s.w);
+    const label = wave === shown ? '' : `wave ${wave}`;
+    shown = wave;
+    return `<li><em>${label}</em>${escapeText(recorder.describe(s))}</li>`;
+  }).join('');
+  const rest = steps.length - STEP_PREVIEW;
+  return rows + (rest > 0 ? `<li><em></em>… ${rest} more</li>` : '');
+}
+
+/** Blueprint names are player-typed and can be pasted in, so never trust them. */
+function escapeText(text) {
+  return String(text).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function buildTapes() {
+  el('tList').addEventListener('click', ev => {
+    const btn = ev.target.closest('button[data-a]');
+    if (!btn) return;
+    const id = btn.closest('.bp').dataset.id;
+
+    switch (btn.dataset.a) {
+      case 'play':
+        actions.replay(id);
+        break;
+      case 'pin':
+        recorder.pin(id);
+        break;
+      case 'rename': {
+        const bp = recorder.find(id);
+        const name = prompt('Name this blueprint', bp ? bp.name : '');
+        if (name) recorder.rename(id, name);
+        break;
+      }
+      case 'copy':
+        copyOut(recorder.exportOne(id));
+        break;
+      case 'del':
+        recorder.remove(id);
+        break;
+    }
+    tapeSig = '';
+    syncTapes();
+    sync();
+  });
+}
+
+/** Clipboard where it is allowed, a selectable prompt where it is not. */
+function copyOut(text) {
+  if (!text) return;
+  try {
+    navigator.clipboard.writeText(text).catch(() => prompt('Copy this blueprint', text));
+  } catch (e) {
+    prompt('Copy this blueprint', text);
+  }
+}
+
 /* ── wiring ───────────────────────────────────────────────────────────── */
 export function bind() {
   buildShop();
   buildFoundry();
+  buildTapes();
 
   el('btnWave').onclick = () => actions.startWave();
   el('btnClear').onclick = () => actions.clearGrid();
@@ -384,6 +610,43 @@ export function bind() {
   el('fClose').onclick = closeFoundry;
   el('btnStartFoundry').onclick = openFoundry;
   el('btnOverFoundry').onclick = openFoundry;
+
+  el('btnTapes').onclick = openTapes;
+  el('btnStartTapes').onclick = openTapes;
+  el('tClose').onclick = closeTapes;
+
+  el('rHold').onclick = () => { recorder.togglePlayback(); sync(); };
+  el('rSkip').onclick = () => { recorder.skipStep(); sync(); };
+  el('rStop').onclick = () => { recorder.stopPlayback(); sync(); };
+
+  el('btnOverReplay').onclick = () => {
+    if (recorder.rec.last) actions.replay(recorder.rec.last.id);
+  };
+
+  el('tKeep').onclick = () => {
+    const bp = recorder.saveTape({ waves: S.wavesCleared, score: S.score, kills: S.kills });
+    if (bp) recorder.pin(bp.id, true);
+    tapeSig = '';
+    syncTapes();
+    sync();
+  };
+
+  el('tImport').onclick = () => {
+    const text = prompt('Paste a blueprint');
+    if (!text) return;
+    if (!recorder.importJSON(text)) alert('That does not look like a blueprint.');
+    tapeSig = '';
+    syncTapes();
+    sync();
+  };
+
+  el('tWipe').onclick = () => {
+    if (!confirm('Delete every saved blueprint? This cannot be undone.')) return;
+    recorder.clearAll();
+    tapeSig = '';
+    syncTapes();
+    sync();
+  };
 
   el('btnPlay').onclick = () => actions.play();
   el('btnAgain').onclick = () => actions.play();
@@ -417,11 +680,13 @@ export function bind() {
     if (ev.repeat) return;
     if (ev.key === 'Escape') {
       if (!el('foundry').classList.contains('hidden')) closeFoundry();
+      else if (!el('tapes').classList.contains('hidden')) closeTapes();
       else { S.picked = null; S.selected = null; sync(); }
       return;
     }
     if (!el('start').classList.contains('hidden') || !el('over').classList.contains('hidden')) return;
     if (!el('foundry').classList.contains('hidden')) return;
+    if (!el('tapes').classList.contains('hidden')) return;
 
     const digit = Number(ev.key);
     if (digit >= 1 && digit <= TOWER_ORDER.length) {
@@ -433,5 +698,6 @@ export function bind() {
     if (ev.key === ' ') { ev.preventDefault(); actions.startWave(); }
     else if (ev.key === 'p' || ev.key === 'P') { actions.togglePause(); el('btnPause').textContent = S.paused ? 'Resume' : 'Pause'; }
     else if (ev.key === 'f' || ev.key === 'F') { openFoundry(); }
+    else if (ev.key === 'b' || ev.key === 'B') { openTapes(); }
   });
 }
