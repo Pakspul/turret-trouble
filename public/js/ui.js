@@ -13,6 +13,7 @@ import * as meta from './meta.js';
 import * as recorder from './recorder.js';
 import * as audio from './audio.js';
 import * as store from './storage.js';
+import { BUILD } from './version.js';
 
 export const el = id => document.getElementById(id);
 
@@ -26,6 +27,10 @@ export const actions = {
   cycleSpeed: () => {},
   toggleDev: () => {},
   abandon: () => {},
+  /** Open the title screen over the run without ending it. */
+  menu: () => {},
+  /** Close the title screen and carry on with the suspended run. */
+  resume: () => {},
   /** Replay a saved blueprint: now if the board is still empty, else next run. */
   replay: () => {}
 };
@@ -272,6 +277,12 @@ export function showStart() {
   el('startBest').textContent = meta.profile.stats.bestWave;
   el('startCores').textContent = meta.profile.cores.toLocaleString();
   el('startRuns').textContent = meta.profile.stats.runs;
+  // A run parked behind the menu can be picked straight back up.
+  const parked = S.suspended;
+  el('btnResume').classList.toggle('hidden', !parked);
+  el('btnResume').textContent = `Resume wave ${Math.max(1, S.wave)}`;
+  el('btnPlay').textContent = parked ? 'New run' : 'Start defending';
+  el('btnPlay').classList.toggle('go', !parked);
   el('start').classList.remove('hidden');
   el('over').classList.add('hidden');
   syncArmed();
@@ -713,9 +724,14 @@ export function bind() {
     el(id).onclick = () => { meta.toggleHeadStart(); syncHeadStart(); };
   }
 
-  el('btnPlay').onclick = () => { autoFullscreen(); actions.play(); };
+  el('btnResume').onclick = () => { autoFullscreen(); actions.resume(); };
+  el('btnPlay').onclick = () => {
+    if (S.suspended && !confirm(`End the wave ${Math.max(1, S.wave)} run and start a new one?`)) return;
+    autoFullscreen();
+    actions.play();
+  };
   el('btnAgain').onclick = () => { autoFullscreen(); actions.play(); };
-  el('btnMenu').onclick = () => actions.abandon();
+  el('btnMenu').onclick = () => actions.menu();
 
   el('btnMute').onclick = () => {
     const muted = audio.toggleMute();
@@ -739,6 +755,7 @@ export function bind() {
   };
 
   if (!store.isPersistent()) el('warnStore').classList.remove('hidden');
+  el('buildTag').textContent = `v${BUILD.version} · ${BUILD.stamp}`;
 
   addEventListener('keydown', ev => {
     if (ev.repeat) return;

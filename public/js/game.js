@@ -36,6 +36,8 @@ export const S = {
   breakLeft: 0,
   speed: 1,
   paused: false,
+  /** True while the menu is open over a run that can still be resumed. */
+  suspended: false,
   /** Developer mode: adds the 10× step to the speed ladder. */
   dev: false,
 
@@ -80,6 +82,7 @@ export function newRun({ headStart: useHeadStart = true } = {}) {
   S.breakLeft = 0;
   S.speed = 1;
   S.paused = false;
+  S.suspended = false;
   scoreCarry = 0;
   S.foes = []; S.shots = []; S.blasts = []; S.arcs = []; S.motes = []; S.notes = [];
   S.picked = null; S.selected = null; S.hover = -1;
@@ -658,7 +661,7 @@ export function bindProjection(toX, toY) { px = toX; py = toY; }
 
 /* ── frame ────────────────────────────────────────────────────────────── */
 export function update(dt) {
-  if (S.paused || S.phase === 'dead' || S.phase === 'menu') return;
+  if (S.paused || S.suspended || S.phase === 'dead' || S.phase === 'menu') return;
 
   S.shake = Math.max(0, S.shake - dt * 2.5);
   S.waveFlash = Math.max(0, S.waveFlash - dt);

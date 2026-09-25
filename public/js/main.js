@@ -23,8 +23,20 @@ let dirty = true;
 S.onChange = () => { dirty = true; };
 
 /* ── actions the console triggers ─────────────────────────────────────── */
+/** A run that is under way and could be picked up again from the menu. */
+const live = () => S.phase !== 'menu' && S.phase !== 'dead';
+
+/** Bank what a run earned when the player walks away from it. */
+function leaveRun() {
+  if (!live()) return;
+  meta.noteRunEnd(S.wavesCleared, S.score);
+  // Walking away from a run still banks its build order.
+  endRecording();
+}
+
 ui.actions.play = () => {
   audio.unlock();
+  leaveRun();
   ui.hideStart();
   ui.el('over').classList.add('hidden');
   ui.el('btnPause').textContent = 'Pause';
@@ -45,14 +57,29 @@ ui.actions.togglePause = () => {
 ui.actions.cycleSpeed = () => cycleSpeed();
 ui.actions.toggleDev = () => setDev(!S.dev);
 
+/** The Menu button: freeze the run behind the title screen, so Resume can
+    carry on exactly where it stopped. */
+ui.actions.menu = () => {
+  if (!live()) { ui.actions.abandon(); return; }
+  S.suspended = true;
+  S.picked = null;
+  ui.showStart();
+  ui.sync();
+};
+
+ui.actions.resume = () => {
+  if (!live()) return;
+  audio.unlock();
+  S.suspended = false;
+  ui.hideStart();
+  ui.sync();
+};
+
 ui.actions.abandon = () => {
-  if (S.phase !== 'menu' && S.phase !== 'dead') {
-    meta.noteRunEnd(S.wavesCleared, S.score);
-    // Walking away from a run still banks its build order.
-    endRecording();
-  }
+  leaveRun();
   S.phase = 'menu';
   S.paused = false;
+  S.suspended = false;
   ui.showStart();
   ui.sync();
 };
