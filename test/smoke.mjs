@@ -220,4 +220,78 @@ for (const [n, k] of cfg.TOWER_ORDER.entries()) {
   assert(Number.isFinite(dps) && dps > 0, `${k} dps should be a positive number, got ${dps}`);
 }
 
+/* ── 9. endless tower levels ─────────────────────────────────── */
+meta.buy('proto');
+S.gold = 1e9;
+const endless = field.field.grid[at(2, 2)];
+let lastDps = game.dpsOf(endless), lastCost = 0;
+for (let n = 0; n < 12; n++) {
+  const cost = game.upgradeCost(endless);
+  assert(cost != null && cost > lastCost, `level ${endless.l + 2} should cost more than the last, got ${cost}`);
+  lastCost = cost;
+  game.upgrade(endless);
+  const dps = game.dpsOf(endless);
+  assert(dps > lastDps, `level ${endless.l + 1} should hit harder`);
+  lastDps = dps;
+}
+assert(endless.l === 12, `a tower should level past 4, got level ${endless.l + 1}`);
+assert(game.upgradeCost(endless) != null, 'there is no level cap past Prototype Cores');
+
+/* ── 10. Cryo Coils ──────────────────────────────────────────── */
+const cryo = field.field.grid[at(8, 2)];
+const coldBefore = game.statsOf(cryo);
+meta.buy('cryocoils');
+const coldAfter = game.statsOf(cryo);
+assert(coldAfter.dmg > coldBefore.dmg, 'Cryo Coils should add Cryo damage');
+assert(coldAfter.slow > coldBefore.slow, 'Cryo Coils should strengthen the slow');
+assert(coldAfter.slowDur > coldBefore.slowDur, 'Cryo Coils should lengthen the chill');
+
+/* ── 11. Rapid Deployment shortens the break to nothing ──────── */
+for (let n = 0; n < cfg.BREAK_SECONDS; n++) meta.profile.cores = 1e9, meta.buy('drills');
+assert(meta.mods.breakTime === 0, `full Rapid Deployment should leave no break, got ${meta.mods.breakTime}`);
+game.newRun();
+S.lives = S.maxLives = 1e6;   // nothing is built; the walkers just leak
+game.startWave();
+for (let n = 0; n < 20000 && S.wave === 1 && S.phase !== 'dead'; n++) game.update(0.05);
+assert(S.wave === 2 && S.phase === 'run', `wave 2 should follow without a break, got wave ${S.wave} ${S.phase}`);
+
+/* ── 12. Overdrive climbs to 10× ─────────────────────────────── */
+meta.profile.cores = 1e9;
+while (meta.buy('overdrive'));
+assert(meta.levelOf('overdrive') === cfg.NODES.overdrive.max, 'Overdrive should buy up to its max');
+assert(game.speedLadder()[game.speedLadder().length - 1] === cfg.OVERDRIVE_TOP, 'full Overdrive tops out at 10×');
+assert(cfg.nodeCost(cfg.NODES.overdrive, 6) > 20000, 'the last Overdrive rank should be costly');
+
+/* ── 13. wave-gated nodes: Flak Warheads and Head Start ──────── */
+meta.profile.stats.bestWave = 39;
+assert(!meta.buy('flak'), 'Flak Warheads needs wave 40');
+meta.profile.stats.bestWave = 40;
+assert(meta.buy('flak'), 'Flak Warheads unlocks at wave 40');
+assert(meta.mods.rocketAir, 'Flak Warheads lets rockets hit air');
+
+meta.profile.stats.bestWave = 29;
+assert(!meta.buy('headstart'), 'Head Start needs wave 30');
+meta.profile.stats.bestWave = 30;
+assert(meta.buy('headstart'), 'Head Start unlocks at wave 30');
+assert(!meta.buy('headstart'), 'the second Head Start rank needs wave 40');
+
+const coresBefore = meta.profile.cores;
+game.newRun();
+assert(S.wave === 10 && S.wavesCleared === 10, `Head Start should open after wave 10, got ${S.wave}`);
+assert(S.gold > 2000, `the skipped waves should pay gold, got ${S.gold}`);
+assert(meta.profile.cores === coresBefore, 'Head Start points wait for the first real wave');
+assert(S.heldPoints > 100, `the skipped waves should be worth points, got ${S.heldPoints}`);
+const held = S.heldPoints;
+S.lives = S.maxLives = 1e6;
+game.startWave();
+for (let n = 0; n < 40000 && S.phase === 'run'; n++) game.update(0.05);
+assert(S.wavesCleared === 11, `wave 11 should be held, got ${S.wavesCleared}`);
+assert(meta.profile.cores - coresBefore >= Math.floor(held), 'holding wave 11 pays the Head Start points');
+assert(S.heldPoints === 0, 'the Head Start points are paid only once');
+
+meta.toggleHeadStart();
+game.newRun();
+assert(S.wave === 0, 'switching Head Start off opens at wave 1');
+meta.toggleHeadStart();
+
 console.log(process.exitCode ? 'SMOKE TEST FAILED' : 'SMOKE TEST PASSED');

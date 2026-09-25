@@ -44,6 +44,15 @@ jobs:
       - name: Smoke test
         run: npm test
 
+      # Stamps the title screen with the release, so a player can see which
+      # build their phone is running: package version, UTC date, short commit.
+      - name: Stamp build version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          STAMP="$(date -u +%Y-%m-%d) · ${GITHUB_SHA::7}"
+          printf "export const BUILD = { version: '%s', stamp: '%s' };\n" "$VERSION" "$STAMP" > public/js/version.js
+          cat public/js/version.js
+
       # app_location is `public`, so `archive/`, `test/`, `server.js` and
       # `web.config` are never uploaded - the same isolation ROOT gives
       # server.js locally. skip_app_build is on because there is no build.

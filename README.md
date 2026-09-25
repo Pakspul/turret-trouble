@@ -46,9 +46,10 @@ constants live at the top of `config.js`:
   the first `300 + 40 × wave` gold you are sitting on. Nothing compounds.
 - **Every turret of a kind makes the next of that kind dearer** (×1.055 each).
   Your fifth Gun is cheap; your fortieth is not. Enemy health, meanwhile,
-  compounds at ×1.135 a wave and a turret tops out at level 4 — so the board
-  fills slowly, mixed builds beat spamming one type, and a run ends when the
-  grid can no longer out-damage the health curve.
+  compounds at ×1.135 a wave. Past Prototype Cores a turret levels forever,
+  but each level past 4 adds ×1.25 damage for ×1.45 the price of the last —
+  so the board fills slowly, mixed builds beat spamming one type, and a run
+  ends when the grid can no longer out-damage the health curve.
 - **Points are back-loaded.** Kills pay a thin flat trickle; the real income is
   `0.7 × wave^1.6` for *holding* a wave. Farming shallow waves gets you
   nowhere, so the Foundry is funded by depth, not by time spent.
@@ -78,10 +79,13 @@ Twenty-four upgrade nodes across four branches:
 - **Ordnance** — per-tower damage, Guidance Chips (faster rockets, bigger
   blast), Rapid Loaders, AP Rounds, Long Barrels, Overcharge (crits).
 - **Tech Branch** — unlocks the **Cryo** tower (pulsing slow field) and the
-  **Tesla** tower (chain lightning), plus Deep Freeze, Capacitors, Overload
-  Coils, and Prototype Cores (tower level 4).
-- **Command** — Reinforced Core, Field Repair, Recon Uplink, Overdrive (4×
-  speed), and Data Siphon.
+  **Tesla** tower (chain lightning), plus Deep Freeze, Cryo Coils (slow,
+  steady Cryo growth), Capacitors, Overload Coils, Prototype Cores (level 4
+  and beyond, with no cap), and Flak Warheads (Rockets hit air; needs wave 40).
+- **Command** — Reinforced Core, Field Repair, Recon Uplink, Overdrive (4×,
+  then +1× per rank up to 10×, steeply priced), Rapid Deployment (−1 s break
+  per rank, down to none), Head Start (each rank skips ten more opening waves
+  and pays them out; needs wave 30, then 40, 50…), and Data Siphon.
 
 Progress lives in `localStorage` under `turret-trouble:profile:v1`. "Reset
 progress" in the Foundry footer wipes it.

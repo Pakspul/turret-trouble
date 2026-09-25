@@ -251,8 +251,16 @@ function drawTower(t, ghost) {
 
   if (!ghost && t.l > 0) {
     ctx.fillStyle = def.color;
-    for (let k = 0; k <= t.l; k++) {
-      ctx.fillRect(x - s + 3 + k * (cell * 0.13), y + s - cell * 0.13, cell * 0.08, cell * 0.07);
+    // Four pips fit the cell; past that the level is written out instead.
+    if (t.l < 4) {
+      for (let k = 0; k <= t.l; k++) {
+        ctx.fillRect(x - s + 3 + k * (cell * 0.13), y + s - cell * 0.13, cell * 0.08, cell * 0.07);
+      }
+    } else {
+      ctx.font = `700 ${Math.max(8, Math.round(cell * 0.24))}px ui-monospace, monospace`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(String(t.l + 1), x - s + 3, y + s - cell * 0.05);
     }
   }
 }
