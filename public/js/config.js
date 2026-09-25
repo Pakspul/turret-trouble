@@ -53,10 +53,23 @@ export const KILL_POINTS = 0.20;
 
 /* ── game speed ───────────────────────────────────────────────────────── */
 export const SPEEDS = [1, 2, 3];
-/** Added by the Overdrive node. */
+/** The first Overdrive rank adds this; every further rank adds 1× more. */
 export const OVERDRIVE_SPEED = 4;
+/** The fastest Overdrive can go once every rank is bought. */
+export const OVERDRIVE_TOP = 10;
 /** Added only in developer mode - see dev.js. */
 export const DEV_SPEED = 10;
+
+/** Top speed for a given number of Overdrive ranks (0 = no Overdrive). */
+export const overdriveTop = l => (l > 0 ? Math.min(OVERDRIVE_TOP, OVERDRIVE_SPEED + l - 1) : SPEEDS[SPEEDS.length - 1]);
+
+/** The speed button's ladder: 1-3×, a few stops on the way, then the top. */
+export function speedSteps(top) {
+  const steps = [...SPEEDS];
+  for (const stop of [4, 6, 8]) if (stop < top) steps.push(stop);
+  if (top > steps[steps.length - 1]) steps.push(top);
+  return steps;
+}
 
 /* ── towers ───────────────────────────────────────────────────────────────
    kind drives which tick routine runs:
@@ -65,7 +78,8 @@ export const DEV_SPEED = 10;
      aura  - pulses a ring, applying a slow to everything inside
      chain - fires an instant arc that jumps between nearby foes
    `unlock` names a Foundry node that must be owned before it can be built.
-   Level 4 of every tower is gated behind the `proto` node.
+   Level 4 of every tower is gated behind the `proto` node. Past level 4
+   there is no ceiling: see levelStats() and levelUpCost() below.
    `cost` is the price of the *first* one; see buildCost() in game.js.    */
 export const TOWERS = {
   gun: {
@@ -121,6 +135,42 @@ export const TOWERS = {
 };
 
 export const TOWER_ORDER = ['gun', 'rocket', 'laser', 'frost', 'tesla'];
+
+/* ── endless levels ───────────────────────────────────────────────────────
+   Level 5 and beyond extend the last authored tier forever. Each extra
+   level multiplies damage, while its price grows a little faster than the
+   damage does, so every rank is still a real decision in a long run.     */
+/** Damage multiplier per level past the last authored tier. */
+export const ENDLESS_DMG = 1.25;
+/** Upgrade price multiplier per level past the last authored tier. */
+export const ENDLESS_COST = 1.45;
+/** Range added per extra level, up to ENDLESS_RANGE_CAP in total. */
+export const ENDLESS_RANGE = 0.08;
+export const ENDLESS_RANGE_CAP = 0.8;
+
+/** Stats of a tower kind at level index `l` (0-based, unbounded). */
+export function levelStats(def, l) {
+  const last = def.lv.length - 1;
+  if (l <= last) return def.lv[l];
+  const extra = l - last;
+  const top = def.lv[last];
+  const grow = Math.pow(ENDLESS_DMG, extra);
+  return {
+    ...top,
+    range:  top.range + Math.min(ENDLESS_RANGE_CAP, ENDLESS_RANGE * extra),
+    dmg:    top.dmg != null ? top.dmg * grow : undefined,
+    dps:    top.dps != null ? top.dps * grow : undefined,
+    pierce: Math.min(0.9, (top.pierce || 0) + 0.01 * extra),
+    up:     levelUpCost(def, l)
+  };
+}
+
+/** Gold to reach level index `l` from the one below it. */
+export function levelUpCost(def, l) {
+  const last = def.lv.length - 1;
+  if (l <= last) return def.lv[l].up;
+  return Math.round(def.lv[last].up * Math.pow(ENDLESS_COST, l - last) / 5) * 5;
+}
 
 /** Arc jump distance, in grid cells. */
 export const CHAIN_REACH = 1.7;
@@ -231,6 +281,13 @@ export const FOUNDRY = [
       { id: 'deepfreeze', name: 'Deep Freeze',     max: 1, base: 700,  growth: 1, req: 'frost',
         step: 'Cryo hits air, +15% slow',
         blurb: 'Cryo pulses reach flyers and bite noticeably harder.' },
+      { id: 'cryocoils',  name: 'Cryo Coils',      max: 12, base: 260, growth: 1.40, req: 'frost',
+        step: '+8% Cryo damage, +3% slow, +3% chill time',
+        blurb: 'Small steps, but they add up: late waves need a Cryo that still holds the line.',
+        value: l => `+${8 * l}% damage · +${3 * l}% slow · +${3 * l}% chill` },
+      { id: 'flak',       name: 'Flak Warheads',   max: 1, base: 4000, growth: 1, minWave: 40,
+        step: 'Rockets also hit air',
+        blurb: 'Proximity fuses let every Rocket and its splash reach flyers. Only unlocks once you have held wave 40.' },
       { id: 'capacitors', name: 'Capacitors',      max: 6, base: 240,  growth: 1.50, req: 'tesla',
         step: '+7% Tesla damage',
         blurb: 'More charge stored between arcs.',
@@ -257,9 +314,19 @@ export const FOUNDRY = [
       { id: 'recon',     name: 'Recon Uplink',    max: 1, base: 200, growth: 1,
         step: 'Preview the next wave',
         blurb: 'See exactly what is queued up while you build.' },
-      { id: 'overdrive', name: 'Overdrive',       max: 1, base: 250, growth: 1,
-        step: `Unlocks ${OVERDRIVE_SPEED}× speed`,
-        blurb: 'Push through the early waves faster.' },
+      { id: 'overdrive', name: 'Overdrive',       max: OVERDRIVE_TOP - OVERDRIVE_SPEED + 1, base: 250, growth: 2.2,
+        step: `+1× top speed, up to ${OVERDRIVE_TOP}×`,
+        blurb: 'Push through the early waves faster. The first rank is cheap; the rest are not.',
+        value: l => `${overdriveTop(l)}× top speed` },
+      { id: 'drills',    name: 'Rapid Deployment', max: BREAK_SECONDS, base: 300, growth: 1.45,
+        step: '-1 s between waves',
+        blurb: 'Shortens the break before the next wave rolls in, all the way down to none at all.',
+        value: l => (l >= BREAK_SECONDS ? 'no break between waves' : `${BREAK_SECONDS - l} s between waves`) },
+      { id: 'headstart', name: 'Head Start',      max: 5, base: 6000, growth: 1.9,
+        minWave: l => 30 + 10 * l,
+        step: 'Skip 10 more opening waves',
+        blurb: 'Every run begins after a boss. The skipped waves are paid out in full - gold, kills and points - as if you had held them.',
+        value: l => `runs start at wave ${10 * l + 1}` },
       { id: 'siphon',    name: 'Data Siphon',     max: 6, base: 250, growth: 1.60,
         step: '+10% points earned',
         blurb: 'Every run funds the Foundry faster.',
@@ -275,6 +342,12 @@ for (const group of FOUNDRY) {
     node.group = group.id;
     NODES[node.id] = node;
   }
+}
+
+/** Best wave needed before the next rank of a node can be bought. */
+export function nodeMinWave(node, level) {
+  if (!node.minWave) return 0;
+  return typeof node.minWave === 'function' ? node.minWave(level) : node.minWave;
 }
 
 /** Cost of the next rank of a node, given its current level. */

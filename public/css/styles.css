@@ -484,6 +484,8 @@ button { font: inherit; }
 
 /* ── the blueprint sheet ──────────────────────────────────────────────── */
 .veil p.armed { color: var(--good); font-size: 12px; }
+.veil .skipToggle { margin-top: 8px; opacity: .7; }
+.veil .skipToggle.on { color: var(--good); opacity: 1; }
 
 #tList { display: flex; flex-direction: column; gap: 8px; }
 

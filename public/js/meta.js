@@ -3,15 +3,17 @@
    levels, and the derived modifier bundle the game reads every frame.    */
 
 import {
-  NODES, nodeCost, TOWERS,
-  BASE_START_GOLD, BASE_LIVES, CRIT_MULT,
-  SPEEDS, OVERDRIVE_SPEED
+  NODES, nodeCost, nodeMinWave, TOWERS,
+  BASE_START_GOLD, BASE_LIVES, CRIT_MULT, BREAK_SECONDS,
+  overdriveTop, speedSteps
 } from './config.js';
 import * as store from './storage.js';
 
 const BLANK = () => ({
   cores: 0,
   levels: {},
+  /** The player can switch Head Start off for a run from wave 1. */
+  headStartOff: false,
   stats: { bestWave: 0, runs: 0, kills: 0, lifetimePoints: 0, bestScore: 0 }
 });
 
@@ -38,13 +40,23 @@ export function available(node) {
   return !node.req || has(node.req);
 }
 
+/** Best wave the next rank of a node asks for (0 when it asks for none). */
+export function waveNeeded(node) {
+  return nodeMinWave(node, lv(node.id));
+}
+
+/** True once the player has held enough waves for the node's next rank. */
+export function reached(node) {
+  return profile.stats.bestWave >= waveNeeded(node);
+}
+
 export function costOf(id) {
   return nodeCost(NODES[id], lv(id));
 }
 
 export function canAfford(id) {
   const node = NODES[id];
-  return available(node) && lv(id) < node.max && profile.cores >= costOf(id);
+  return available(node) && reached(node) && lv(id) < node.max && profile.cores >= costOf(id);
 }
 
 export function buy(id) {
@@ -74,6 +86,16 @@ export function noteKill() {
   profile.stats.kills++;
 }
 
+/** True when the next run should use the Head Start it owns. */
+export function headStartOn() {
+  return mods.skipWaves > 0 && !profile.headStartOff;
+}
+
+export function toggleHeadStart() {
+  profile.headStartOff = !profile.headStartOff;
+  persist();
+}
+
 /* ── derived modifiers ─────────────────────────────────────────────────── */
 export function recompute() {
   const dmg = {};
@@ -82,6 +104,7 @@ export function recompute() {
   dmg.rocket += 0.07 * lv('warheads');
   dmg.laser  += 0.07 * lv('lens');
   dmg.tesla  += 0.07 * lv('capacitors');
+  dmg.frost  += 0.08 * lv('cryocoils');
 
   Object.assign(mods, {
     startGold:   BASE_START_GOLD + 20 * lv('seed'),
@@ -103,13 +126,18 @@ export function recompute() {
     critMult:    CRIT_MULT,
 
     chainBonus:  lv('overload'),
-    slowBonus:   has('deepfreeze') ? 0.15 : 0,
+    slowBonus:   (has('deepfreeze') ? 0.15 : 0) + 0.03 * lv('cryocoils'),
+    chillTime:   1 + 0.03 * lv('cryocoils'),
     frostAir:    has('deepfreeze'),
+    rocketAir:   has('flak'),
 
-    maxTier:     has('proto') ? 3 : 2,
+    // Past Prototype Cores there is no ceiling on tower levels.
+    maxTier:     has('proto') ? Infinity : 2,
     repair:      has('repair'),
     recon:       has('recon'),
-    speeds:      has('overdrive') ? [...SPEEDS, OVERDRIVE_SPEED] : [...SPEEDS]
+    breakTime:   Math.max(0, BREAK_SECONDS - lv('drills')),
+    skipWaves:   10 * lv('headstart'),
+    speeds:      speedSteps(overdriveTop(lv('overdrive')))
   });
 
   revision.n++;
@@ -157,6 +185,7 @@ export function init() {
       profile.levels[id] = Math.max(0, Math.min(NODES[id].max, Number(value) || 0));
     }
     Object.assign(profile.stats, BLANK().stats, saved.stats || {});
+    profile.headStartOff = saved.headStartOff === true;
   }
   recompute();
 }
@@ -166,6 +195,7 @@ export function resetProfile() {
   profile.cores = blank.cores;
   profile.levels = blank.levels;
   profile.stats = blank.stats;
+  profile.headStartOff = blank.headStartOff;
   recompute();
   store.wipe();
   store.save(profile);

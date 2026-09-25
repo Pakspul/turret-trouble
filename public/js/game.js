@@ -5,7 +5,7 @@
 
 import {
   COLS, ROWS, SPAWN, GOAL, SPAWN_R, GOAL_R, cx, cy,
-  TOWERS, FOES, CHAIN_REACH, CHAIN_FALLOFF, BREAK_SECONDS,
+  TOWERS, FOES, CHAIN_REACH, CHAIN_FALLOFF, levelStats, levelUpCost,
   BUILD_ESCALATION, KILL_GOLD_GROWTH, interestCap,
   clearGold, earlyCallGold, wavePoints, KILL_POINTS, DEV_SPEED
 } from './config.js';
@@ -24,6 +24,10 @@ export const S = {
   wave: 0,
   kills: 0,
   wavesCleared: 0,
+  /** Opening waves Head Start paid out instead of playing this run. */
+  skipped: 0,
+  /** Head Start points, held back until the first real wave is held. */
+  heldPoints: 0,
 
   // pacing
   phase: 'menu',        // menu | build | run | break | dead
@@ -61,7 +65,7 @@ export const S = {
 const touch = () => S.onChange();
 
 /* ── lifecycle ────────────────────────────────────────────────────────── */
-export function newRun() {
+export function newRun({ headStart: useHeadStart = true } = {}) {
   resetField();
   S.gold = meta.mods.startGold;
   S.score = 0;
@@ -80,10 +84,41 @@ export function newRun() {
   S.foes = []; S.shots = []; S.blasts = []; S.arcs = []; S.motes = []; S.notes = [];
   S.picked = null; S.selected = null; S.hover = -1;
   S.shake = 0; S.waveFlash = 0; S.warn = 0;
+  S.heldPoints = 0;
+  S.skipped = useHeadStart && meta.headStartOn() ? meta.mods.skipWaves : 0;
+  if (S.skipped) headStart(S.skipped);
   // Starts a fresh tape, and hands the opening to the autopilot if a
   // blueprint has been armed.
   recorder.beginRun();
   touch();
+}
+
+/**
+ * Head Start: pay out the opening waves as if they had been held - every
+ * kill's gold and points, every clear bonus - then open on the wave after.
+ * Interest is left out, since it depends on what the player would have
+ * banked. The waves are rolled for real, so the payout matches their mix.
+ * The points are held back until the first real wave is held, so starting
+ * and abandoning runs cannot farm them.
+ */
+function headStart(skip) {
+  let gold = 0, points = 0, kills = 0;
+  for (let w = 1; w <= skip; w++) {
+    for (const order of buildWave(w)) {
+      const def = FOES[order.type];
+      gold += Math.round(def.gold * (1 + KILL_GOLD_GROWTH * w) * meta.mods.killGold);
+      points += def.score * KILL_POINTS;
+      kills++;
+    }
+    gold += Math.round(clearGold(w) * meta.mods.waveGold);
+    points += wavePoints(w);
+  }
+  S.gold += gold;
+  S.kills += kills;
+  S.wave = skip;
+  S.wavesCleared = skip;
+  S.nextWave = buildWave(skip + 1);
+  S.heldPoints = points * meta.mods.points;
 }
 
 function gameOver() {
@@ -131,6 +166,11 @@ function endWave() {
 
   // Holding the wave is where nearly all Foundry income comes from.
   award(wavePoints(S.wave) * meta.mods.points);
+  if (S.heldPoints > 0) {
+    award(S.heldPoints);
+    note(px(COLS / 2), py(1.2), `+${Math.round(S.heldPoints)} head start points`, '#7ddf8f');
+    S.heldPoints = 0;
+  }
 
   if (meta.mods.repair && S.wavesCleared % 8 === 0 && S.lives < S.maxLives) {
     S.lives++;
@@ -139,7 +179,9 @@ function endWave() {
 
   meta.persist();
   S.phase = 'break';
-  S.breakLeft = BREAK_SECONDS;
+  // Rapid Deployment can take this all the way to zero, in which case the
+  // next frame sends the following wave straight away.
+  S.breakLeft = meta.mods.breakTime;
   touch();
 }
 
@@ -266,7 +308,7 @@ function chill(e, amount, duration) {
 /* ── tower stats with Foundry modifiers folded in ─────────────────────── */
 export function statsOf(tower) {
   const def = TOWERS[tower.k];
-  const lv = def.lv[tower.l];
+  const lv = levelStats(def, tower.l);
   const m = meta.mods;
   const dmgMul = m.dmg[tower.k] || 1;
 
@@ -280,11 +322,12 @@ export function statsOf(tower) {
     ramp:    lv.ramp || 0,
     chains:  (lv.chains || 0) + (tower.k === 'tesla' ? m.chainBonus : 0),
     slow:    Math.min(0.85, (lv.slow || 0) * (1 + m.slowBonus)),
-    slowDur: lv.slowDur || 0
+    slowDur: (lv.slowDur || 0) * (tower.k === 'frost' ? m.chillTime : 1)
   };
 }
 
-/** Highest level index this tower may reach right now. */
+/** Highest level index this tower may reach right now (Infinity once
+    Prototype Cores is owned). */
 export function maxTier() {
   return meta.mods.maxTier;
 }
@@ -327,7 +370,9 @@ function tickTower(t, dt) {
   const def = TOWERS[t.k];
   const st = statsOf(t);
   const tx = cx(t.i) + 0.5, ty = cy(t.i) + 0.5;
-  const hitsAir = def.kind === 'aura' ? meta.mods.frostAir : def.air;
+  const hitsAir = def.kind === 'aura' ? meta.mods.frostAir
+    : t.k === 'rocket' ? def.air || meta.mods.rocketAir
+    : def.air;
 
   if (def.kind === 'aura') {
     t.cd -= dt;
@@ -374,7 +419,7 @@ function tickTower(t, dt) {
   S.shots.push({
     k: t.k, x: tx, y: ty, tgt: target,
     spd: t.k === 'gun' ? 15 : 7.5 * meta.mods.rocketSpeed,
-    dmg: st.dmg, pierce: st.pierce, splash: st.splash,
+    dmg: st.dmg, pierce: st.pierce, splash: st.splash, air: hitsAir,
     crit: meta.rollCrit(), col: def.color, life: 2.2
   });
   if (t.k === 'rocket') sfx.rocket();
@@ -431,7 +476,7 @@ function tickShot(s, dt) {
   if (s.splash) {
     S.blasts.push({ x: s.x, y: s.y, r: s.splash, t: 0.3, col: s.col });
     for (const e of S.foes) {
-      if (e.dead || e.def.fly) continue;
+      if (e.dead || (e.def.fly && !s.air)) continue;
       const dd = Math.hypot(e.x - s.x, e.y - s.y);
       if (dd <= s.splash) {
         hurt(e, s.dmg * mult * (1 - 0.45 * (dd / s.splash)), s.pierce, s.col, s.crit);
@@ -546,9 +591,8 @@ export function sell(t) {
 }
 
 export function upgradeCost(t) {
-  const def = TOWERS[t.k];
-  if (t.l >= Math.min(def.lv.length - 1, maxTier())) return null;
-  return def.lv[t.l + 1].up;
+  if (t.l >= maxTier()) return null;
+  return levelUpCost(TOWERS[t.k], t.l + 1);
 }
 
 export function upgrade(t) {
@@ -584,7 +628,7 @@ export function clearGrid() {
 /** The steps the speed button cycles through, in order. */
 export function speedLadder() {
   const steps = [...meta.mods.speeds];
-  if (S.dev) steps.push(DEV_SPEED);
+  if (S.dev && !steps.includes(DEV_SPEED)) steps.push(DEV_SPEED);
   return steps;
 }
 

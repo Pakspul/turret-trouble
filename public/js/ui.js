@@ -106,7 +106,7 @@ function syncSelection() {
   const def = TOWERS[t.k];
   const st = statsOf(t);
   const capped = cost == null;
-  const atProtoWall = capped && t.l < def.lv.length - 1;
+  const atProtoWall = capped;
   const refund = refundOf(t);
 
   const extra = def.kind === 'aura'
@@ -285,6 +285,20 @@ export function syncArmed() {
     el(id).textContent = text;
     el(id).classList.toggle('hidden', !bp);
   }
+  syncHeadStart();
+}
+
+/** The Head Start switch, shown only once the node is owned. */
+function syncHeadStart() {
+  const owned = meta.mods.skipWaves > 0;
+  const text = meta.headStartOn()
+    ? `Head start on · run opens at wave ${meta.mods.skipWaves + 1}`
+    : 'Head start off · run opens at wave 1';
+  for (const id of ['startSkip', 'overSkip']) {
+    el(id).textContent = text;
+    el(id).classList.toggle('hidden', !owned);
+    el(id).classList.toggle('on', meta.headStartOn());
+  }
 }
 
 export function hideStart() {
@@ -327,6 +341,7 @@ export function openFoundry() {
 
 export function closeFoundry() {
   el('foundry').classList.add('hidden');
+  syncHeadStart();
   if (resumeAfterFoundry) S.paused = false;
   resumeAfterFoundry = false;
   el('btnPause').textContent = S.paused ? 'Resume' : 'Pause';
@@ -395,7 +410,8 @@ function syncFoundry() {
 function nodeCard(node) {
   const level = meta.levelOf(node.id);
   const maxed = level >= node.max;
-  const open = meta.available(node);
+  const needWave = maxed ? 0 : meta.waveNeeded(node);
+  const open = meta.available(node) && meta.reached(node);
   const cost = maxed ? null : meta.costOf(node.id);
   const affordable = !maxed && open && meta.profile.cores >= cost;
 
@@ -415,8 +431,10 @@ function nodeCard(node) {
     ? `<div class="cur">now: ${node.value(level)}</div>`
     : '';
 
-  const cta = !open
+  const cta = !meta.available(node)
     ? `Needs ${NODES[node.req].name}`
+    : !open
+      ? `Hold wave ${needWave} first`
     : maxed
       ? (node.max > 1 ? 'Fully upgraded' : 'Unlocked')
       : `${cost} ◈`;
@@ -690,6 +708,10 @@ export function bind() {
     syncTapes();
     sync();
   };
+
+  for (const id of ['startSkip', 'overSkip']) {
+    el(id).onclick = () => { meta.toggleHeadStart(); syncHeadStart(); };
+  }
 
   el('btnPlay').onclick = () => { autoFullscreen(); actions.play(); };
   el('btnAgain').onclick = () => { autoFullscreen(); actions.play(); };

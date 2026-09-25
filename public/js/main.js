@@ -163,7 +163,8 @@ function frame(now) {
 /* ── go ───────────────────────────────────────────────────────────────── */
 ui.bind();
 S.dev = storedDev();
-newRun();
+// The board behind the menu is only a backdrop, so it skips Head Start.
+newRun({ headStart: false });
 S.phase = 'menu';
 ui.showStart();
 ui.sync();
