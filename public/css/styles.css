@@ -589,3 +589,15 @@ button { font: inherit; }
   .node .nb { display: none; }
   .bp ol { max-height: 120px; }
 }
+
+/* Very short viewports (a phone in landscape with the browser bars
+   showing): each readout on one line, and the dev tag goes because the
+   speed button is already tinted in dev mode. */
+@media (max-height: 340px) {
+  .readouts { gap: 2px 6px; }
+  .readout { flex-direction: row; align-items: baseline; justify-content: space-between; }
+  .readout .v { font-size: 13px; }
+  .readout:last-child .k { display: none; }
+  .devtag { display: none; }
+  .dock .btn { padding-top: 5px; padding-bottom: 5px; }
+}
