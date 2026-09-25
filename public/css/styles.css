@@ -162,9 +162,9 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 1px 0; }
 /* ── swap a turret for another kind ───────────────────────────────────── */
 .swap { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 5px; }
 .swap .lbl { display: block; color: var(--dim); font-size: 10px; margin-bottom: 4px; }
-.swap .opts { display: flex; gap: 4px; }
+.swap .opts { display: flex; flex-wrap: wrap; gap: 4px; }
 .sw {
-  flex: 1;
+  flex: 1 0 calc(33% - 4px);
   display: flex;
   flex-direction: column;
   align-items: center;

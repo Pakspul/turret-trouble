@@ -6,7 +6,7 @@ you build turrets to stop them.
 
 The twist is the **Foundry**: holding a wave scores points on top of the gold
 it pays, and those points survive the run. Between runs you spend them on
-permanent upgrades — more starting gold, harder-hitting towers, and two extra
+permanent upgrades — more starting gold, harder-hitting towers, and four extra
 tower types.
 
 ## Playing
@@ -24,7 +24,7 @@ tower types.
 - **Blueprints** replays a build you have already worked out, so a run that
   ended badly does not have to be re-clicked from scratch.
 
-Keyboard: `1`–`5` pick a tower, `space` sends a wave, `P` pauses, `F` opens the
+Keyboard: `1`–`7` pick a tower, `space` sends a wave, `P` pauses, `F` opens the
 Foundry, `B` opens Blueprints, `Esc` clears the selection or closes whichever
 sheet is open, `Shift+D` toggles developer mode.
 
@@ -33,7 +33,7 @@ sheet is open, `Shift+D` toggles developer mode.
 | | earned by | spent on | persists |
 |---|---|---|---|
 | **Gold** | kills, clearing waves, interest | towers and their in-run upgrades | no — resets each run |
-| **Points / Cores ◈** | mostly clearing waves | Foundry upgrades | yes — banked immediately |
+| **Points / Cores ◈** | mostly clearing waves, plus Core Factories | Foundry upgrades | yes — banked immediately |
 
 Points are banked the moment they are earned, so closing the tab mid-run never
 costs you progress.
@@ -72,7 +72,12 @@ shows a badge in the panel. The setting is remembered in `localStorage`; press
 
 ### The Foundry
 
-Twenty-four upgrade nodes across four branches:
+Twenty-eight upgrade nodes across four branches. Most of the scaling nodes
+are **endless**: instead of filling up and reading "Fully upgraded" they show
+their rank (`lvl 12`) and keep going, each rank costing a fixed multiple of the
+last. Only Long Barrels, Reinforced Core, Overdrive and Rapid Deployment keep a
+final rank, along with the one-time unlocks. Requisition compounds (−3% of
+what is left), and Overcharge adds crit damage once crit chance reaches 100%.
 
 - **Logistics** — Seed Capital (start with more than 240 gold), Bounty Optics,
   Wave Dividend, Compound Interest, Requisition (cheaper turrets).
@@ -82,6 +87,13 @@ Twenty-four upgrade nodes across four branches:
   **Tesla** tower (chain lightning), plus Deep Freeze, Cryo Coils (slow,
   steady Cryo growth), Capacitors, Overload Coils, Prototype Cores (level 4
   and beyond, with no cap), and Flak Warheads (Rockets hit air; needs wave 40).
+  **Portal Lab** unlocks the **Portal** tower: on a long cooldown it opens a
+  portal under the leading enemy in range and drops it back at the spawn
+  (Titans are too heavy to send); Phase Tuning shortens that cooldown.
+  **Core Factory** unlocks a passive building that deals no damage but mints
+  Cores while a wave is running (0.25/s at level 1, rising with each level);
+  Core Refinery adds +15% output per rank. Factories idle during the build
+  phase and the break, so standing still earns nothing.
 - **Command** — Reinforced Core, Field Repair, Recon Uplink, Overdrive (4×,
   then +1× per rank up to 10×, steeply priced), Rapid Deployment (−1 s break
   per rank, down to none), Head Start (each rank skips ten more opening waves

@@ -24,6 +24,8 @@ const { field } = fieldMod;
 
 const MAX_WAVES = Number(process.argv[2]) || 40;
 const PROFILE = process.argv[3] || 'none';
+/** Ranks of an endless Foundry node that the mid/full profiles stand in for. */
+const ENDLESS_PROBE = 10;
 
 meta.init();
 game.bindProjection(u => u * 10, u => u * 10);
@@ -33,7 +35,8 @@ if (PROFILE !== 'none') {
   const share = PROFILE === 'full' ? 1 : 0.5;
   for (const group of cfg.FOUNDRY) {
     for (const node of group.nodes) {
-      const want = Math.max(node.max === 1 ? 1 : 1, Math.round(node.max * share));
+      // Endless nodes are costed as if they stopped at ENDLESS_PROBE ranks.
+      const want = Math.max(1, Math.round(Math.min(node.max, ENDLESS_PROBE) * share));
       for (let n = 0; n < want; n++) meta.buy(node.id);
     }
   }
@@ -153,7 +156,7 @@ console.log(`\nend: wave ${S.wave} (${S.phase}), score ${S.score}, cores ${meta.
 
 const foundryTotal = cfg.FOUNDRY.reduce((sum, g) => sum + g.nodes.reduce((s, n) => {
   let c = 0;
-  for (let l = 0; l < n.max; l++) c += cfg.nodeCost(n, l);
+  for (let l = 0; l < Math.min(n.max, ENDLESS_PROBE); l++) c += cfg.nodeCost(n, l);
   return s + c;
 }, 0), 0);
-console.log(`foundry costs ${foundryTotal} cores in total - this run funded ${(meta.profile.cores / foundryTotal * 100).toFixed(1)}% of it`);
+console.log(`foundry costs ${foundryTotal} cores in total (endless nodes to rank ${ENDLESS_PROBE}) - this run funded ${(meta.profile.cores / foundryTotal * 100).toFixed(1)}% of it`);

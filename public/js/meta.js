@@ -4,8 +4,8 @@
 
 import {
   NODES, nodeCost, nodeMinWave, TOWERS,
-  BASE_START_GOLD, BASE_LIVES, CRIT_MULT, BREAK_SECONDS,
-  overdriveTop, speedSteps
+  BASE_START_GOLD, BASE_LIVES, BREAK_SECONDS,
+  overdriveTop, speedSteps, requisitionMul, critChance, critMult
 } from './config.js';
 import * as store from './storage.js';
 
@@ -109,7 +109,7 @@ export function recompute() {
   Object.assign(mods, {
     startGold:   BASE_START_GOLD + 20 * lv('seed'),
     lives:       BASE_LIVES + lv('core'),
-    buildCost:   1 - 0.03 * lv('requisition'),
+    buildCost:   requisitionMul(lv('requisition')),
     killGold:    1 + 0.05 * lv('bounty'),
     waveGold:    1 + 0.10 * lv('dividend'),
     interest:    0.02 * lv('interest'),
@@ -122,14 +122,16 @@ export function recompute() {
     pierce:      0.03 * lv('ap'),
     splash:      1 + 0.04 * lv('guidance'),
     rocketSpeed: 1 + 0.14 * lv('guidance'),
-    crit:        0.03 * lv('crit'),
-    critMult:    CRIT_MULT,
+    crit:        critChance(lv('crit')),
+    critMult:    critMult(lv('crit')),
 
     chainBonus:  lv('overload'),
     slowBonus:   (has('deepfreeze') ? 0.15 : 0) + 0.03 * lv('cryocoils'),
     chillTime:   1 + 0.03 * lv('cryocoils'),
     frostAir:    has('deepfreeze'),
     rocketAir:   has('flak'),
+    portalRate:  Math.pow(0.96, lv('phase')),
+    factoryYield: 1 + 0.15 * lv('refinery'),
 
     // Past Prototype Cores there is no ceiling on tower levels.
     maxTier:     has('proto') ? Infinity : 2,
@@ -179,7 +181,7 @@ export function init() {
     profile.cores = Math.max(0, Number(saved.cores) || 0);
     profile.levels = {};
     // Drop unknown ids and clamp levels, so an older save cannot inflate a
-    // node past its current maximum.
+    // node past its current maximum. Endless nodes have none to clamp to.
     for (const [id, value] of Object.entries(saved.levels || {})) {
       if (!NODES[id]) continue;
       profile.levels[id] = Math.max(0, Math.min(NODES[id].max, Number(value) || 0));

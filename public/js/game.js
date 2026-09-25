@@ -7,7 +7,8 @@ import {
   COLS, ROWS, SPAWN, GOAL, SPAWN_R, GOAL_R, cx, cy,
   TOWERS, FOES, CHAIN_REACH, CHAIN_FALLOFF, levelStats, levelUpCost,
   BUILD_ESCALATION, KILL_GOLD_GROWTH, interestCap,
-  clearGold, earlyCallGold, wavePoints, KILL_POINTS, DEV_SPEED
+  clearGold, earlyCallGold, wavePoints, KILL_POINTS, DEV_SPEED,
+  PORTAL_SPARES_BOSSES
 } from './config.js';
 import { field, solve, commit, legal, reset as resetField } from './field.js';
 import { buildWave } from './waves.js';
@@ -24,6 +25,8 @@ export const S = {
   wave: 0,
   kills: 0,
   wavesCleared: 0,
+  /** Cores the Core Factories minted this run (kept apart from the score). */
+  minted: 0,
   /** Opening waves Head Start paid out instead of playing this run. */
   skipped: 0,
   /** Head Start points, held back until the first real wave is held. */
@@ -46,6 +49,8 @@ export const S = {
   shots: [],
   blasts: [],
   arcs: [],
+  /** Portal flashes: a ring where a foe vanished and where it reappeared. */
+  warps: [],
   motes: [],
   notes: [],
 
@@ -76,6 +81,7 @@ export function newRun({ headStart: useHeadStart = true } = {}) {
   S.wave = 0;
   S.kills = 0;
   S.wavesCleared = 0;
+  S.minted = 0;
   S.phase = 'build';
   S.queue = [];
   S.nextWave = buildWave(1);
@@ -84,7 +90,7 @@ export function newRun({ headStart: useHeadStart = true } = {}) {
   S.paused = false;
   S.suspended = false;
   scoreCarry = 0;
-  S.foes = []; S.shots = []; S.blasts = []; S.arcs = []; S.motes = []; S.notes = [];
+  S.foes = []; S.shots = []; S.blasts = []; S.arcs = []; S.warps = []; S.motes = []; S.notes = [];
   S.picked = null; S.selected = null; S.hover = -1;
   S.shake = 0; S.waveFlash = 0; S.warn = 0;
   S.heldPoints = 0;
@@ -319,13 +325,14 @@ export function statsOf(tower) {
     range:   lv.range * m.range,
     dmg:     (lv.dmg || 0) * dmgMul,
     dps:     (lv.dps || 0) * dmgMul,
-    rate:    (lv.rate || 0) * m.rate,
+    rate:    (lv.rate || 0) * m.rate * (tower.k === 'portal' ? m.portalRate : 1),
     pierce:  (lv.pierce || 0) + m.pierce,
     splash:  (lv.splash || 0) * (tower.k === 'rocket' ? m.splash : 1),
     ramp:    lv.ramp || 0,
     chains:  (lv.chains || 0) + (tower.k === 'tesla' ? m.chainBonus : 0),
     slow:    Math.min(0.85, (lv.slow || 0) * (1 + m.slowBonus)),
-    slowDur: (lv.slowDur || 0) * (tower.k === 'frost' ? m.chillTime : 1)
+    slowDur: (lv.slowDur || 0) * (tower.k === 'frost' ? m.chillTime : 1),
+    yield:   (lv.yield || 0) * m.factoryYield
   };
 }
 
@@ -343,6 +350,8 @@ export function dpsOf(tower) {
     case 'beam':  return Math.round(st.dps * meta.critAverage());
     case 'chain': return Math.round(st.dmg / st.rate * meta.critAverage());
     case 'aura':  return Math.round(st.dmg / st.rate);
+    case 'portal':
+    case 'factory': return 0;
     default:      return Math.round(st.dmg / st.rate * (1 + meta.mods.crit * (meta.mods.critMult - 1)));
   }
 }
@@ -357,10 +366,12 @@ function progress(e) {
 
 function acquire(tower, def, range, hitsAir) {
   const tx = cx(tower.i) + 0.5, ty = cy(tower.i) + 0.5;
+  const spareBosses = def.kind === 'portal' && PORTAL_SPARES_BOSSES;
   let best = null, bestScore = Infinity;
   for (const e of S.foes) {
     if (e.dead || e.x < -0.2) continue;
     if (e.def.fly && !hitsAir) continue;
+    if (spareBosses && e.def.boss) continue;
     if (Math.hypot(e.x - tx, e.y - ty) > range) continue;
     const s = progress(e);
     if (s < bestScore) { bestScore = s; best = e; }
@@ -376,6 +387,11 @@ function tickTower(t, dt) {
   const hitsAir = def.kind === 'aura' ? meta.mods.frostAir
     : t.k === 'rocket' ? def.air || meta.mods.rocketAir
     : def.air;
+
+  if (def.kind === 'factory') {
+    mint(t, st, dt);
+    return;
+  }
 
   if (def.kind === 'aura') {
     t.cd -= dt;
@@ -419,6 +435,11 @@ function tickTower(t, dt) {
     return;
   }
 
+  if (def.kind === 'portal') {
+    sendHome(target, def.color, tx, ty);
+    return;
+  }
+
   S.shots.push({
     k: t.k, x: tx, y: ty, tgt: target,
     spd: t.k === 'gun' ? 15 : 7.5 * meta.mods.rocketSpeed,
@@ -454,6 +475,35 @@ function fireChain(t, st, first, tx, ty) {
 
   if (points.length > 1) S.arcs.push({ points, t: 0.14 });
   sfx.arc();
+}
+
+/** Drop a foe back at the entrance, as if it had just spawned. */
+function sendHome(e, colour, tx, ty) {
+  S.warps.push({ x: e.x, y: e.y, fx: tx, fy: ty, t: 0.5, col: colour });
+  // Flyers keep their lane; walkers go back to the entry cell and re-path.
+  e.x = -0.7;
+  if (!e.def.fly) {
+    e.y = SPAWN_R + 0.5;
+    e.cc = SPAWN;
+    e.to = null;
+  }
+  S.warps.push({ x: 0.5, y: e.y, t: 0.5, col: colour });
+  sfx.warp();
+}
+
+/* Factories only work while a wave is running: the build phase waits for
+   the player forever, so minting there would pay for walking away. */
+function mint(t, st, dt) {
+  t.spin = ((t.spin || 0) + dt * (S.phase === 'run' ? 2 : 0.3)) % 6.284;
+  if (S.phase !== 'run') return;
+  t.store = (t.store || 0) + st.yield * dt;
+  const whole = Math.floor(t.store);
+  if (whole < 1) return;
+  t.store -= whole;
+  S.minted += whole;
+  meta.addPoints(whole);
+  note(px(cx(t.i) + 0.5), py(cy(t.i) + 0.2), '+' + whole + ' ◈', '#ffd76b');
+  touch();
 }
 
 function tickShot(s, dt) {
@@ -707,6 +757,9 @@ export function update(dt) {
 
   for (const a of S.arcs) a.t -= dt;
   S.arcs = S.arcs.filter(a => a.t > 0);
+
+  for (const w of S.warps) w.t -= dt;
+  S.warps = S.warps.filter(w => w.t > 0);
 
   for (const m of S.motes) {
     m.x += m.vx * dt; m.y += m.vy * dt;

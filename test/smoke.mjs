@@ -182,9 +182,10 @@ assert(meta.profile.cores === before.cores, 'cores should survive a reload');
 assert(meta.profile.levels.seed === before.levels.seed, 'levels should survive a reload');
 
 /* an out-of-range saved level must be clamped, not trusted */
-mem.set('turret-trouble:profile:v1', JSON.stringify({ cores: 5, levels: { seed: 999, bogus: 4 }, stats: {} }));
+mem.set('turret-trouble:profile:v1', JSON.stringify({ cores: 5, levels: { barrels: 999, seed: 12, bogus: 4 }, stats: {} }));
 meta.init();
-assert(meta.levelOf('seed') === cfg.NODES.seed.max, 'oversized saved level should clamp to max');
+assert(meta.levelOf('barrels') === cfg.NODES.barrels.max, 'oversized saved level should clamp to max');
+assert(meta.levelOf('seed') === 12, 'an endless node keeps whatever rank it reached');
 assert(meta.levelOf('bogus') === 0, 'unknown node should be dropped');
 
 /* ── 7b. the speed ladder ────────────────────────────────────── */
@@ -215,6 +216,7 @@ game.newRun();
 S.gold = 100000;
 for (const [n, k] of cfg.TOWER_ORDER.entries()) {
   const cellIdx = at(2 + n * 2, 2);
+  if (!meta.towerUnlocked(k)) continue;
   assert(game.place(cellIdx, k), `should place ${k}`);
   const dps = game.dpsOf(field.field.grid[cellIdx]);
   assert(Number.isFinite(dps) && dps > 0, `${k} dps should be a positive number, got ${dps}`);
@@ -293,5 +295,60 @@ meta.toggleHeadStart();
 game.newRun();
 assert(S.wave === 0, 'switching Head Start off opens at wave 1');
 meta.toggleHeadStart();
+
+/* ── 14. endless Foundry research ────────────────────────────── */
+meta.profile.cores = 1e12;
+const endlessIds = ['seed', 'bounty', 'dividend', 'interest', 'requisition', 'munitions', 'warheads',
+  'lens', 'guidance', 'loaders', 'ap', 'crit', 'cryocoils', 'capacitors', 'overload', 'siphon',
+  'phase', 'refinery', 'headstart'];
+for (const id of endlessIds) assert(cfg.NODES[id].max === Infinity, `${id} should be endless`);
+for (const id of ['barrels', 'core', 'overdrive', 'drills']) {
+  assert(Number.isFinite(cfg.NODES[id].max), `${id} keeps its cap`);
+}
+const seedAt = meta.levelOf('seed');
+for (let n = 0; n < 25; n++) assert(meta.buy('seed'), `Seed Capital rank ${seedAt + n + 1} should be buyable`);
+assert(meta.mods.startGold === cfg.BASE_START_GOLD + 20 * (seedAt + 25), 'endless Seed Capital keeps adding gold');
+while (meta.levelOf('requisition') < 40) meta.buy('requisition');
+assert(meta.mods.buildCost > 0.25 && meta.mods.buildCost < 0.35, `Requisition compounds, got ${meta.mods.buildCost}`);
+while (meta.levelOf('crit') < 36) meta.buy('crit');
+assert(meta.mods.crit === 1, 'Overcharge chance stops at 100%');
+assert(meta.mods.critMult > cfg.CRIT_MULT, 'Overcharge past 100% adds crit damage');
+
+/* ── 15. Portal: sends the leader home, spares Titans ────────── */
+meta.buy('portal'); meta.buy('factory');
+assert(meta.towerUnlocked('portal') && meta.towerUnlocked('factory'), 'Portal and Core Factory unlock in the Foundry');
+game.newRun();
+S.gold = 100000;
+S.lives = S.maxLives = 1e6;
+assert(game.place(at(10, 3), 'portal'), 'Portal should place');
+game.startWave();
+let ported = false;
+for (let n = 0; n < 60 * 120 && S.phase === 'run'; n++) {
+  const before = S.foes.map(e => [e, e.x]);
+  game.update(1 / 60);
+  for (const [e, x] of before) if (!e.dead && x > 5 && e.x < 0) ported = true;
+}
+assert(ported, 'the Portal should send a foe back to the spawn');
+
+/* ── 16. Core Factory mints Cores only while a wave runs ─────── */
+game.newRun();
+S.gold = 100000;
+S.lives = S.maxLives = 1e6;
+assert(game.place(at(10, 3), 'factory'), 'Core Factory should place');
+const plant = field.field.grid[at(10, 3)];
+const idleCores = meta.profile.cores;
+for (let n = 0; n < 600; n++) game.update(1 / 60);
+assert(meta.profile.cores === idleCores, 'no minting in the build phase');
+game.startWave();
+const coresRun = meta.profile.cores, scoreRun = S.score;
+for (let n = 0; n < 60 * 20 && S.phase === 'run'; n++) game.update(1 / 60);
+assert(S.minted > 0, 'a factory should mint during a wave');
+assert(meta.profile.cores - coresRun >= S.minted, 'minted Cores go into the bank');
+const yield0 = game.statsOf(plant).yield;
+meta.buy('refinery');
+assert(game.statsOf(plant).yield > yield0, 'Core Refinery raises output');
+game.upgrade(plant);
+assert(game.statsOf(plant).yield > yield0 * 1.15, 'factory levels raise output');
+assert(game.dpsOf(plant) === 0, 'a factory deals no damage');
 
 console.log(process.exitCode ? 'SMOKE TEST FAILED' : 'SMOKE TEST PASSED');
