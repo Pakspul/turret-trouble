@@ -89,11 +89,12 @@ function syncShop() {
 }
 
 let selSig = '';
+let selShown = null;
 
 function syncSelection() {
   const box = el('sel');
   const t = S.selected;
-  if (!t || field.grid[t.i] !== t) { box.classList.add('hidden'); selSig = ''; return; }
+  if (!t || field.grid[t.i] !== t) { box.classList.add('hidden'); selSig = ''; selShown = null; return; }
 
   const cost = upgradeCost(t);
   // Swap prices move with the board, so they go in the signature too.
@@ -136,6 +137,13 @@ function syncSelection() {
   el('bSell').onclick = () => sell(t);
   for (const btn of box.querySelectorAll('.sw')) {
     btn.onclick = () => convert(t, btn.dataset.k);
+  }
+
+  // On a short screen the readout can land below the fold of the scrolling
+  // console, so bring it into view whenever a different turret is picked.
+  if (selShown !== t) {
+    selShown = t;
+    try { box.scrollIntoView({ block: 'nearest' }); } catch (e) { box.scrollIntoView(false); }
   }
 }
 
@@ -656,6 +664,10 @@ export function bind() {
     const muted = audio.toggleMute();
     el('btnMute').textContent = muted ? 'Sound off' : 'Sound on';
   };
+
+  // iPhones have no Fullscreen API; hide the button rather than leave it dead.
+  const root = document.documentElement;
+  if (!(root.requestFullscreen || root.webkitRequestFullscreen)) el('btnFs').classList.add('hidden');
 
   el('btnFs').onclick = () => {
     try {
