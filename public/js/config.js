@@ -77,6 +77,8 @@ export function speedSteps(top) {
      beam  - continuous damage that ramps while locked on one target
      aura  - pulses a ring, applying a slow to everything inside
      chain - fires an instant arc that jumps between nearby foes
+     portal - on a long cooldown, sends the leading foe back to the spawn
+     factory - never fires; mints Cores while a wave is running
    `unlock` names a Foundry node that must be owned before it can be built.
    Level 4 of every tower is gated behind the `proto` node. Past level 4
    there is no ceiling: see levelStats() and levelUpCost() below.
@@ -131,10 +133,36 @@ export const TOWERS = {
       { range: 3.2, dmg: 72,  rate: 0.70, chains: 4, pierce: 0.50, up: 360 },
       { range: 3.5, dmg: 118, rate: 0.62, chains: 5, pierce: 0.58, up: 800 }
     ]
+  },
+  portal: {
+    name: 'Portal', color: '#7cf0b5', kind: 'portal', air: true, cost: 260,
+    blurb: 'sends the leader back to spawn', unlock: 'portal',
+    lv: [
+      { range: 3.0, rate: 9.0 },
+      { range: 3.3, rate: 7.5, up: 220 },
+      { range: 3.6, rate: 6.2, up: 480 },
+      { range: 3.9, rate: 5.0, up: 1000 }
+    ]
+  },
+  factory: {
+    name: 'Core Factory', color: '#ffd76b', kind: 'factory', air: false, cost: 200,
+    blurb: 'mints Cores during waves', unlock: 'factory',
+    lv: [
+      { range: 0, yield: 0.25 },
+      { range: 0, yield: 0.40, up: 160 },
+      { range: 0, yield: 0.60, up: 360 },
+      { range: 0, yield: 0.90, up: 800 }
+    ]
   }
 };
 
-export const TOWER_ORDER = ['gun', 'rocket', 'laser', 'frost', 'tesla'];
+export const TOWER_ORDER = ['gun', 'rocket', 'laser', 'frost', 'tesla', 'portal', 'factory'];
+
+/** Titans shrug off a Portal; everything else can be sent home. */
+export const PORTAL_SPARES_BOSSES = true;
+/** Endless Portal levels shorten the cooldown by this factor, to a floor. */
+export const PORTAL_ENDLESS_RATE = 0.93;
+export const PORTAL_MIN_RATE = 1.5;
 
 /* ── endless levels ───────────────────────────────────────────────────────
    Level 5 and beyond extend the last authored tier forever. Each extra
@@ -157,9 +185,13 @@ export function levelStats(def, l) {
   const grow = Math.pow(ENDLESS_DMG, extra);
   return {
     ...top,
-    range:  top.range + Math.min(ENDLESS_RANGE_CAP, ENDLESS_RANGE * extra),
+    range:  top.range ? top.range + Math.min(ENDLESS_RANGE_CAP, ENDLESS_RANGE * extra) : 0,
     dmg:    top.dmg != null ? top.dmg * grow : undefined,
     dps:    top.dps != null ? top.dps * grow : undefined,
+    yield:  top.yield != null ? top.yield * grow : undefined,
+    rate:   def.kind === 'portal'
+      ? Math.max(PORTAL_MIN_RATE, top.rate * Math.pow(PORTAL_ENDLESS_RATE, extra))
+      : top.rate,
     pierce: Math.min(0.9, (top.pierce || 0) + 0.01 * extra),
     up:     levelUpCost(def, l)
   };
@@ -205,57 +237,72 @@ export const SPAWN_TABLE = [
 /* ── the Foundry: permanent upgrades bought with Cores ────────────────────
    Every node is `max` levels deep and costs base * growth^level, rounded to
    the nearest 5. `value` renders the running total at a given level so the
-   card can show what the next purchase actually buys.                     */
+   card can show what the next purchase actually buys.
+
+   Most scaling nodes are ENDLESS: they never read "Fully upgraded", so a
+   long career keeps finding something to spend Cores on. The growth factor
+   is the only brake - every rank costs a fixed multiple of the last.      */
+/** `max` for a node with no final rank. */
+export const ENDLESS = Infinity;
+
+/** Requisition compounds, so no number of ranks makes turrets free. */
+export const requisitionMul = l => Math.pow(0.97, l);
+/** Overcharge stops adding chance at 100%; ranks past that add crit damage. */
+export const CRIT_STEP = 0.03;
+export const CRIT_OVERFLOW_MULT = 0.1;
+export const critChance = l => Math.min(1, CRIT_STEP * l);
+export const critMult = l => CRIT_MULT + CRIT_OVERFLOW_MULT * Math.max(0, l - Math.ceil(1 / CRIT_STEP));
+
 export const FOUNDRY = [
   {
     id: 'logistics', name: 'Logistics', hint: 'More gold, sooner.',
     nodes: [
-      { id: 'seed',     name: 'Seed Capital',      max: 10, base: 120, growth: 1.45,
+      { id: 'seed',     name: 'Seed Capital',      max: ENDLESS, base: 120, growth: 1.45,
         step: '+20 starting gold',
         blurb: 'Pre-loads the vault before wave 1 so the opening build is stronger.',
         value: l => `${BASE_START_GOLD + 20 * l} gold at wave 1` },
-      { id: 'bounty',   name: 'Bounty Optics',     max: 8, base: 180, growth: 1.50,
+      { id: 'bounty',   name: 'Bounty Optics',     max: ENDLESS, base: 180, growth: 1.50,
         step: '+5% gold per kill',
         blurb: 'Every kill pays out more during the run.',
         value: l => `+${5 * l}% kill gold` },
-      { id: 'dividend', name: 'Wave Dividend',     max: 6, base: 200, growth: 1.55,
+      { id: 'dividend', name: 'Wave Dividend',     max: ENDLESS, base: 200, growth: 1.55,
         step: '+10% wave-clear payout',
         blurb: 'Fatter bonus each time you hold a wave.',
         value: l => `+${10 * l}% clear bonus` },
-      { id: 'interest', name: 'Compound Interest', max: 5, base: 400, growth: 1.60,
+      { id: 'interest', name: 'Compound Interest', max: ENDLESS, base: 400, growth: 1.60,
         step: '+2% of unspent gold per wave',
         blurb: 'Banking gold between waves earns you more of it. Only the first 300 + 40 per wave counts, so it pays for patience, not for a fortune.',
         value: l => `+${2 * l}% interest` },
-      { id: 'requisition', name: 'Requisition',      max: 6, base: 220, growth: 1.50,
-        step: '-3% tower build cost',
-        blurb: 'Trims the price of every turret, including the escalation on your tenth Gun.',
-        value: l => `-${3 * l}% build cost` }
+      { id: 'requisition', name: 'Requisition',      max: ENDLESS, base: 220, growth: 1.50,
+        step: '-3% tower build cost (compounding)',
+        blurb: 'Trims the price of every turret, including the escalation on your tenth Gun. Each rank takes 3% off what is left.',
+        value: l => `-${Math.round((1 - requisitionMul(l)) * 100)}% build cost` }
     ]
   },
   {
     id: 'ordnance', name: 'Ordnance', hint: 'Hit harder, hit faster.',
     nodes: [
-      { id: 'munitions',  name: 'Kinetic Munitions', max: 8, base: 140, growth: 1.45,
+      { id: 'munitions',  name: 'Kinetic Munitions', max: ENDLESS, base: 140, growth: 1.45,
         step: '+6% Gun damage',
         blurb: 'Denser slugs out of every Gun barrel.',
         value: l => `+${6 * l}% Gun damage` },
-      { id: 'warheads',   name: 'Warheads',          max: 8, base: 190, growth: 1.48,
+      { id: 'warheads',   name: 'Warheads',          max: ENDLESS, base: 190, growth: 1.48,
         step: '+7% Rocket damage',
         blurb: 'Heavier payload on every Rocket.',
         value: l => `+${7 * l}% Rocket damage` },
-      { id: 'lens',       name: 'Focusing Lens',     max: 8, base: 175, growth: 1.48,
+      { id: 'lens',       name: 'Focusing Lens',     max: ENDLESS, base: 175, growth: 1.48,
         step: '+7% Laser damage',
         blurb: 'Tighter beam, more energy on target.',
         value: l => `+${7 * l}% Laser damage` },
-      { id: 'guidance',   name: 'Guidance Chips',    max: 5, base: 220, growth: 1.50,
+      { id: 'guidance',   name: 'Guidance Chips',    max: ENDLESS, base: 220, growth: 1.50,
         step: '+14% Rocket speed, +4% blast radius',
         blurb: 'Rockets that actually catch what they were aimed at.',
         value: l => `+${14 * l}% speed · +${4 * l}% blast` },
-      { id: 'loaders',    name: 'Rapid Loaders',     max: 6, base: 260, growth: 1.55,
+      { id: 'loaders',    name: 'Rapid Loaders',     max: ENDLESS, base: 260, growth: 1.55,
         step: '+4% fire rate (all towers)',
         blurb: 'Shorter reload cycle across the whole grid.',
         value: l => `+${4 * l}% fire rate` },
-      { id: 'ap',         name: 'AP Rounds',         max: 6, base: 210, growth: 1.50,
+      { id: 'ap',         name: 'AP Rounds',         max: ENDLESS, base: 210, growth: 1.50,
         step: '+3 armour pierce',
         blurb: 'Cuts through Tank and Bulwark plating.',
         value: l => `+${3 * l} pierce` },
@@ -263,10 +310,10 @@ export const FOUNDRY = [
         step: '+4% range (all towers)',
         blurb: 'Every tower covers more of the grid.',
         value: l => `+${4 * l}% range` },
-      { id: 'crit',       name: 'Overcharge',        max: 6, base: 300, growth: 1.55,
+      { id: 'crit',       name: 'Overcharge',        max: ENDLESS, base: 300, growth: 1.55,
         step: `+3% chance of a ×${CRIT_MULT} hit`,
-        blurb: 'Occasional devastating shots. Beams get the average instead.',
-        value: l => `${3 * l}% crit chance` }
+        blurb: `Occasional devastating shots. Beams get the average instead. Past 100% chance, each rank adds +${CRIT_OVERFLOW_MULT}× crit damage.`,
+        value: l => `${Math.round(critChance(l) * 100)}% crit chance · ×${critMult(l).toFixed(1)} hit` }
     ]
   },
   {
@@ -281,21 +328,35 @@ export const FOUNDRY = [
       { id: 'deepfreeze', name: 'Deep Freeze',     max: 1, base: 700,  growth: 1, req: 'frost',
         step: 'Cryo hits air, +15% slow',
         blurb: 'Cryo pulses reach flyers and bite noticeably harder.' },
-      { id: 'cryocoils',  name: 'Cryo Coils',      max: 12, base: 260, growth: 1.40, req: 'frost',
+      { id: 'cryocoils',  name: 'Cryo Coils',      max: ENDLESS, base: 260, growth: 1.40, req: 'frost',
         step: '+8% Cryo damage, +3% slow, +3% chill time',
         blurb: 'Small steps, but they add up: late waves need a Cryo that still holds the line.',
         value: l => `+${8 * l}% damage · +${3 * l}% slow · +${3 * l}% chill` },
       { id: 'flak',       name: 'Flak Warheads',   max: 1, base: 4000, growth: 1, minWave: 40,
         step: 'Rockets also hit air',
         blurb: 'Proximity fuses let every Rocket and its splash reach flyers. Only unlocks once you have held wave 40.' },
-      { id: 'capacitors', name: 'Capacitors',      max: 6, base: 240,  growth: 1.50, req: 'tesla',
+      { id: 'capacitors', name: 'Capacitors',      max: ENDLESS, base: 240,  growth: 1.50, req: 'tesla',
         step: '+7% Tesla damage',
         blurb: 'More charge stored between arcs.',
         value: l => `+${7 * l}% Tesla damage` },
-      { id: 'overload',   name: 'Overload Coils',  max: 2, base: 800,  growth: 1.60, req: 'tesla',
+      { id: 'overload',   name: 'Overload Coils',  max: ENDLESS, base: 800,  growth: 1.60, req: 'tesla',
         step: '+1 arc jump',
         blurb: 'Each Tesla shot chains to more targets.',
         value: l => `+${l} extra jump${l === 1 ? '' : 's'}` },
+      { id: 'portal',     name: 'Portal Lab',      max: 1, base: 1200, growth: 1,
+        step: 'Unlocks the Portal tower',
+        blurb: 'A slow gun that opens a portal under the leading enemy and drops it back at the spawn. Titans are too heavy to send.' },
+      { id: 'phase',      name: 'Phase Tuning',    max: ENDLESS, base: 350, growth: 1.50, req: 'portal',
+        step: '-4% Portal cooldown (compounding)',
+        blurb: 'Recharges the portal faster, so it sends more of the wave home.',
+        value: l => `-${Math.round((1 - Math.pow(0.96, l)) * 100)}% Portal cooldown` },
+      { id: 'factory',    name: 'Core Factory',    max: 1, base: 1500, growth: 1,
+        step: 'Unlocks the Core Factory',
+        blurb: 'A passive building that mints Cores every second a wave is running. It deals no damage, so every factory is a turret you did not build.' },
+      { id: 'refinery',   name: 'Core Refinery',   max: ENDLESS, base: 400, growth: 1.50, req: 'factory',
+        step: '+15% Core Factory output',
+        blurb: 'Every factory on the grid mints Cores faster.',
+        value: l => `+${15 * l}% factory output` },
       { id: 'proto',      name: 'Prototype Cores', max: 1, base: 1600, growth: 1,
         step: 'Unlocks tower level 4',
         blurb: 'A fourth upgrade tier on every tower. Expensive in-run, but decisive.' }
@@ -322,12 +383,12 @@ export const FOUNDRY = [
         step: '-1 s between waves',
         blurb: 'Shortens the break before the next wave rolls in, all the way down to none at all.',
         value: l => (l >= BREAK_SECONDS ? 'no break between waves' : `${BREAK_SECONDS - l} s between waves`) },
-      { id: 'headstart', name: 'Head Start',      max: 5, base: 6000, growth: 1.9,
+      { id: 'headstart', name: 'Head Start',      max: ENDLESS, base: 6000, growth: 1.9,
         minWave: l => 30 + 10 * l,
         step: 'Skip 10 more opening waves',
         blurb: 'Every run begins after a boss. The skipped waves are paid out in full - gold, kills and points - as if you had held them.',
         value: l => `runs start at wave ${10 * l + 1}` },
-      { id: 'siphon',    name: 'Data Siphon',     max: 6, base: 250, growth: 1.60,
+      { id: 'siphon',    name: 'Data Siphon',     max: ENDLESS, base: 250, growth: 1.60,
         step: '+10% points earned',
         blurb: 'Every run funds the Foundry faster.',
         value: l => `+${10 * l}% points` }

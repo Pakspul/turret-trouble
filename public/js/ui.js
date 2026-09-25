@@ -40,7 +40,9 @@ const GLYPHS = {
   rocket: '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h11l5 4-5 4H3"/><path d="M8 12h4"/></svg>',
   laser: '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l8 6-8 6z"/><path d="M13 12h8"/></svg>',
   frost: '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M4 7l16 10M20 7L4 17"/></svg>',
-  tesla: '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L5 13h6l-2 9 8-11h-6z"/></svg>'
+  tesla: '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L5 13h6l-2 9 8-11h-6z"/></svg>',
+  portal: '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="5" ry="9"/><path d="M2 12h6M16 12h6"/></svg>',
+  factory: '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l3 3M16 16l3 3M19 5l-3 3M8 16l-3 3"/></svg>'
 };
 
 const LOCK = '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>';
@@ -104,7 +106,7 @@ function syncSelection() {
   const cost = upgradeCost(t);
   // Swap prices move with the board, so they go in the signature too.
   const swapCosts = TOWER_ORDER.map(k => (k === t.k ? '-' : convertCost(t, k)));
-  const sig = `${meta.revision.n}|${t.i}|${t.k}|${t.l}|${cost}|${S.gold}|${t.spent}|${swapCosts}`;
+  const sig = `${meta.revision.n}|${t.i}|${t.k}|${t.l}|${cost}|${S.gold}|${t.spent}|${swapCosts}|${t.k === 'factory' ? S.minted : ''}`;
   if (sig === selSig) return;
   selSig = sig;
 
@@ -113,6 +115,15 @@ function syncSelection() {
   const capped = cost == null;
   const atProtoWall = capped;
   const refund = refundOf(t);
+
+  const readout = def.kind === 'factory'
+    ? `<div class="st"><span>cores/s</span><b>${st.yield.toFixed(2)}</b></div>
+       <div class="st"><span>minted this run</span><b>${S.minted}</b></div>`
+    : def.kind === 'portal'
+      ? `<div class="st"><span>cooldown</span><b>${st.rate.toFixed(1)} s</b></div>
+         <div class="st"><span>range</span><b>${st.range.toFixed(1)}</b></div>`
+      : `<div class="st"><span>damage/s</span><b>${dpsOf(t)}</b></div>
+         <div class="st"><span>range</span><b>${st.range.toFixed(1)}</b></div>`;
 
   const extra = def.kind === 'aura'
     ? `<div class="st"><span>slow</span><b>${Math.round(st.slow * 100)}%</b></div>`
@@ -123,8 +134,7 @@ function syncSelection() {
   box.classList.remove('hidden');
   box.innerHTML =
     `<div class="hd" style="color:${def.color}">${def.name} · lvl ${t.l + 1}</div>
-     <div class="st"><span>damage/s</span><b>${dpsOf(t)}</b></div>
-     <div class="st"><span>range</span><b>${st.range.toFixed(1)}</b></div>
+     ${readout}
      ${extra}
      <div class="st note">${def.blurb}</div>
      <div class="pair">
@@ -318,7 +328,8 @@ export function hideStart() {
 
 export function showGameOver() {
   el('overWave').textContent = S.wavesCleared;
-  el('overScore').textContent = S.score.toLocaleString();
+  // Factory Cores are banked but kept out of the score, so show them apart.
+  el('overScore').textContent = S.score.toLocaleString() + (S.minted ? ` +${S.minted.toLocaleString()} ◈` : '');
   el('overKills').textContent = S.kills;
   el('overBest').textContent = meta.profile.stats.bestWave;
   el('overCores').textContent = meta.profile.cores.toLocaleString();
@@ -420,6 +431,7 @@ function syncFoundry() {
 
 function nodeCard(node) {
   const level = meta.levelOf(node.id);
+  const endless = node.max === Infinity;
   const maxed = level >= node.max;
   const needWave = maxed ? 0 : meta.waveNeeded(node);
   const open = meta.available(node) && meta.reached(node);
@@ -433,7 +445,10 @@ function nodeCard(node) {
   card.classList.toggle('locked', !open);
   card.classList.toggle('ready', affordable);
 
-  const pips = node.max > 1
+  // Endless nodes have no last pip to fill, so they count ranks instead.
+  const pips = endless
+    ? `<span class="pips one">${level ? 'lvl ' + level : ''}</span>`
+    : node.max > 1
     ? `<span class="pips">${Array.from({ length: node.max }, (_, n) =>
         `<i class="${n < level ? 'on' : ''}"></i>`).join('')}</span>`
     : `<span class="pips one">${level ? 'owned' : ''}</span>`;

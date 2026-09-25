@@ -55,6 +55,7 @@ export const sfx = {
   blast:   () => blip(110, 0.16, 'sawtooth', 0.045),
   arc:     () => blip(880, 0.05, 'square', 0.022),
   freeze:  () => blip(1180, 0.06, 'sine', 0.020),
+  warp:    () => blip(240, 0.22, 'sine', 0.050),
   breach:  () => blip(90, 0.30, 'sawtooth', 0.070),
   boss:    () => blip(140, 0.35, 'sawtooth', 0.080),
   kill:    () => blip(300 + Math.random() * 120, 0.05, 'triangle', 0.025),

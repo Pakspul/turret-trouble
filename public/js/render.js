@@ -64,6 +64,7 @@ export function draw() {
   for (const e of S.foes) drawFoe(e);
 
   drawArcs();
+  drawWarps();
   drawShots();
   drawBlasts();
   drawMotes();
@@ -236,6 +237,26 @@ function drawTower(t, ghost) {
     }
     ctx.stroke();
     ctx.beginPath(); ctx.arc(0, 0, cell * 0.1, 0, 6.284); ctx.fill();
+  } else if (t.k === 'portal') {
+    // A ring emitter on a short barrel.
+    ctx.fillRect(cell * 0.08 - recoil, -cell * 0.05, cell * 0.26, cell * 0.1);
+    ctx.lineWidth = Math.max(1.5, cell * 0.06);
+    ctx.strokeStyle = def.color;
+    ctx.beginPath(); ctx.ellipse(0, 0, cell * 0.12, cell * 0.2, 0, 0, 6.284); ctx.stroke();
+  } else if (t.k === 'factory') {
+    // A cog that turns quickly while a wave runs and idles between them.
+    ctx.rotate(-(t.ang || 0) + (t.spin || 0));
+    ctx.lineWidth = Math.max(1.5, cell * 0.06);
+    ctx.strokeStyle = def.color;
+    ctx.beginPath();
+    for (let k = 0; k < 8; k++) {
+      const a = k / 8 * 6.284;
+      ctx.moveTo(Math.cos(a) * cell * 0.14, Math.sin(a) * cell * 0.14);
+      ctx.lineTo(Math.cos(a) * cell * 0.26, Math.sin(a) * cell * 0.26);
+    }
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, cell * 0.14, 0, 6.284); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, cell * 0.06, 0, 6.284); ctx.fill();
   } else {
     // Tesla: a pair of prongs with a spark bridging them.
     ctx.rotate(-(t.ang || 0));
@@ -309,6 +330,28 @@ function drawArcs() {
     }
     ctx.globalAlpha = 1;
   }
+}
+
+function drawWarps() {
+  for (const w of S.warps) {
+    const k = w.t / 0.5;
+    ctx.strokeStyle = w.col;
+    // The shot itself: a fading streak from the Portal to where it landed.
+    if (w.fx !== undefined) {
+      ctx.globalAlpha = k * 0.6;
+      ctx.lineWidth = cell * 0.05;
+      ctx.beginPath();
+      ctx.moveTo(px(w.fx), py(w.fy));
+      ctx.lineTo(px(w.x), py(w.y));
+      ctx.stroke();
+    }
+    ctx.globalAlpha = k;
+    ctx.lineWidth = Math.max(1.5, cell * 0.08 * k);
+    ctx.beginPath();
+    ctx.ellipse(px(w.x), py(w.y), cell * 0.22 * (1.4 - k * 0.4), cell * 0.36 * (1.4 - k * 0.4), 0, 0, 6.284);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawShots() {
