@@ -89,11 +89,12 @@ function syncShop() {
 }
 
 let selSig = '';
+let selShown = null;
 
 function syncSelection() {
   const box = el('sel');
   const t = S.selected;
-  if (!t || field.grid[t.i] !== t) { box.classList.add('hidden'); selSig = ''; return; }
+  if (!t || field.grid[t.i] !== t) { box.classList.add('hidden'); selSig = ''; selShown = null; return; }
 
   const cost = upgradeCost(t);
   // Swap prices move with the board, so they go in the signature too.
@@ -136,6 +137,13 @@ function syncSelection() {
   el('bSell').onclick = () => sell(t);
   for (const btn of box.querySelectorAll('.sw')) {
     btn.onclick = () => convert(t, btn.dataset.k);
+  }
+
+  // On a short screen the readout can land below the fold of the scrolling
+  // console, so bring it into view whenever a different turret is picked.
+  if (selShown !== t) {
+    selShown = t;
+    try { box.scrollIntoView({ block: 'nearest' }); } catch (e) { box.scrollIntoView(false); }
   }
 }
 
@@ -592,6 +600,41 @@ function copyOut(text) {
   }
 }
 
+/* ── full screen ──────────────────────────────────────────────────────────
+   Browsers only allow full screen from inside a tap, so phones go full
+   screen when a run starts. Android then hides the address and status bars
+   and can hold landscape. iOS Safari has no API for it; there the page runs
+   chrome-free only when launched from the home screen (see index.html). */
+const docEl = document.documentElement;
+
+const canFullscreen = () => !!(docEl.requestFullscreen || docEl.webkitRequestFullscreen);
+const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+
+function enterFullscreen() {
+  try {
+    const request = docEl.requestFullscreen || docEl.webkitRequestFullscreen;
+    Promise.resolve(request.call(docEl, { navigationUI: 'hide' }))
+      .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'))
+      .catch(() => { /* refused, or orientation lock unsupported */ });
+  } catch (e) { /* fullscreen unavailable */ }
+}
+
+function leaveFullscreen() {
+  try {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    Promise.resolve(exit.call(document)).catch(() => {});
+  } catch (e) { /* not in full screen */ }
+}
+
+/** Touch devices only: a desktop window should stay a window. */
+function autoFullscreen() {
+  if (!canFullscreen() || fullscreenElement()) return;
+  if (!matchMedia('(pointer: coarse)').matches) return;
+  // An installed app launched full screen already has no browser bars.
+  if (matchMedia('(display-mode: fullscreen)').matches) return;
+  enterFullscreen();
+}
+
 /* ── wiring ───────────────────────────────────────────────────────────── */
 export function bind() {
   buildShop();
@@ -648,8 +691,8 @@ export function bind() {
     sync();
   };
 
-  el('btnPlay').onclick = () => actions.play();
-  el('btnAgain').onclick = () => actions.play();
+  el('btnPlay').onclick = () => { autoFullscreen(); actions.play(); };
+  el('btnAgain').onclick = () => { autoFullscreen(); actions.play(); };
   el('btnMenu').onclick = () => actions.abandon();
 
   el('btnMute').onclick = () => {
@@ -657,15 +700,14 @@ export function bind() {
     el('btnMute').textContent = muted ? 'Sound off' : 'Sound on';
   };
 
-  el('btnFs').onclick = () => {
-    try {
-      const root = document.documentElement;
-      const p = document.fullscreenElement
-        ? document.exitFullscreen()
-        : (root.requestFullscreen || root.webkitRequestFullscreen).call(root);
-      if (p && p.catch) p.catch(() => {});
-    } catch (e) { /* fullscreen unavailable */ }
-  };
+  // iPhones have no Fullscreen API; hide the button rather than leave it dead.
+  if (!canFullscreen()) el('btnFs').classList.add('hidden');
+  el('btnFs').onclick = () => (fullscreenElement() ? leaveFullscreen() : enterFullscreen());
+  for (const type of ['fullscreenchange', 'webkitfullscreenchange']) {
+    document.addEventListener(type, () => {
+      el('btnFs').textContent = fullscreenElement() ? 'Exit full screen' : 'Full screen';
+    });
+  }
 
   el('fWipe').onclick = () => {
     if (!confirm('Erase all Cores, upgrades and records? This cannot be undone.')) return;

@@ -8,6 +8,13 @@
 <title>Turret Trouble</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<!-- Launched from the home screen, run without browser chrome. iOS has no
+     Fullscreen API, so this is the only way to lose Safari's address bar. -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Turret Trouble">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -16,13 +23,18 @@
   <div id="stage"><canvas id="cv"></canvas></div>
 
   <aside id="panel">
-    <div class="readout"><span class="k">wave</span><span class="v" id="waveNo">1</span></div>
-    <div class="readout"><span class="k">gold</span><span class="v" id="gold">0</span></div>
-    <div class="readout"><span class="k">score</span><span class="v" id="score">0</span></div>
-    <div class="readout"><span class="k">breaches left</span><span id="lives">♥♥♥</span></div>
+    <div class="readouts">
+      <div class="readout"><span class="k">wave</span><span class="v" id="waveNo">1</span></div>
+      <div class="readout"><span class="k">gold</span><span class="v" id="gold">0</span></div>
+      <div class="readout"><span class="k">score</span><span class="v" id="score">0</span></div>
+      <div class="readout"><span class="k">breaches left</span><span id="lives">♥♥♥</span></div>
+    </div>
     <div id="devTag" class="devtag hidden">dev mode · shift+D</div>
     <hr>
 
+    <!-- Everything between the readouts and the wave dock scrolls, so short
+         (phone landscape) screens can still reach every control. -->
+    <div class="pscroll" id="pscroll">
     <div class="shop" id="shop"></div>
 
     <div id="sel" class="hidden"></div>
@@ -41,11 +53,6 @@
 
     <div class="spacer"></div>
 
-    <button class="btn go" id="btnWave">Send wave 1</button>
-    <div class="row">
-      <button class="btn" id="btnPause">Pause</button>
-      <button class="btn" id="btnSpeed">1×</button>
-    </div>
     <button class="btn foundry" id="btnFoundry">Foundry <b id="cores">0</b> ◈</button>
     <button class="btn tape" id="btnTapes">Blueprints <b id="tapeTally">0</b></button>
     <div class="row">
@@ -55,6 +62,16 @@
     <div class="row">
       <button class="btn tiny" id="btnMute">Sound on</button>
       <button class="btn tiny" id="btnFs">Full screen</button>
+    </div>
+    </div>
+
+    <!-- The wave controls stay pinned at the bottom, never scrolled away. -->
+    <div class="dock">
+      <button class="btn go" id="btnWave">Send wave 1</button>
+      <div class="row">
+        <button class="btn" id="btnPause">Pause</button>
+        <button class="btn" id="btnSpeed">1×</button>
+      </div>
     </div>
   </aside>
 </div>

@@ -132,6 +132,10 @@ canvas.addEventListener('pointerup', ev => {
   if (ev.pointerType !== 'mouse') S.hover = -1;
 });
 
+// iOS Safari ignores user-scalable=no; stop pinch-zoom from knocking the
+// layout out of the viewport.
+document.addEventListener('gesturestart', ev => ev.preventDefault(), { passive: false });
+
 canvas.addEventListener('pointercancel', () => { dragging = false; S.hover = -1; });
 canvas.addEventListener('pointerleave', () => { if (!dragging) S.hover = -1; });
 
