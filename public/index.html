@@ -27,7 +27,7 @@
       <div class="readout"><span class="k">wave</span><span class="v" id="waveNo">1</span></div>
       <div class="readout"><span class="k">gold</span><span class="v" id="gold">0</span></div>
       <div class="readout"><span class="k">score</span><span class="v" id="score">0</span></div>
-      <div class="readout"><span class="k">breaches left</span><span id="lives">♥♥♥</span></div>
+      <div class="readout"><span class="k" id="livesK">breaches left</span><span id="lives">♥♥♥</span></div>
     </div>
     <div id="devTag" class="devtag hidden">dev mode · shift+D</div>
     <hr>
@@ -36,6 +36,19 @@
          (phone landscape) screens can still reach every control. -->
     <div class="pscroll" id="pscroll">
     <div class="shop" id="shop"></div>
+
+    <!-- Frontier only: buy units into a squad and send them at the enemy. -->
+    <div id="squad" class="hidden">
+      <div class="hd">Barracks <b id="sqCount"></b></div>
+      <div class="units" id="unitShop"></div>
+      <button class="btn tiny" id="bArmory">Armory</button>
+      <div class="pair">
+        <button class="btn go tiny" id="bDeploy">Deploy now</button>
+        <button class="btn tiny warn" id="bDisband">Disband</button>
+      </div>
+      <div class="line" id="sqLine"></div>
+      <div class="foe" id="sqEnemy"></div>
+    </div>
 
     <div id="sel" class="hidden"></div>
     <div id="recon" class="hidden"></div>
@@ -53,6 +66,7 @@
 
     <div class="spacer"></div>
 
+    <button class="btn tiny hidden" id="btnHome">Centre on HQ</button>
     <button class="btn foundry" id="btnFoundry">Foundry <b id="cores">0</b> ◈</button>
     <button class="btn tape" id="btnTapes">Blueprints <b id="tapeTally">0</b></button>
     <div class="row">
@@ -89,6 +103,7 @@
 <!-- title screen -->
 <div class="veil" id="start">
   <div class="mark">TURRET<span>TROUBLE</span></div>
+  <p class="modes"><b>Holdout</b> · hold the grid, wave after wave. <b class="fr">Frontier</b> · open maps, enemies that shoot back, and a base to raze.</p>
   <p>Hold the grid. Every kill pays gold for this run and points for the next one.
      Spend those points in the Foundry to start richer, hit harder, and unlock new towers.</p>
   <div class="stats">
@@ -100,6 +115,7 @@
     <button class="btn go big hidden" id="btnResume">Resume</button>
     <button class="btn go big" id="btnPlay">Start defending</button>
     <button class="btn go big hidden" id="btnPlayHead">Head start</button>
+    <button class="btn big frontier" id="btnFrontier">Frontier</button>
     <button class="btn big" id="btnStartFoundry">Foundry</button>
     <button class="btn big" id="btnStartTapes">Blueprints</button>
   </div>
@@ -113,8 +129,9 @@
 <div class="veil hidden" id="over">
   <p id="overLead">The line broke.</p>
   <div class="figure" id="overWave">0</div>
-  <p>waves held · best <b id="overBest">0</b> · <b id="overCores">0</b> cores banked</p>
+  <p>waves held · <span id="overBestK">best</span> <b id="overBest">0</b> · <b id="overCores">0</b> cores banked</p>
   <div class="veilRow">
+    <button class="btn go big hidden" id="btnOverNext">Next sector</button>
     <button class="btn go big" id="btnAgain">Defend again</button>
     <button class="btn go big hidden" id="btnAgainHead">Head start</button>
     <button class="btn big hidden" id="btnOverReplay">Replay this build</button>
@@ -146,6 +163,26 @@
       <span>lifetime points <b id="fLifetime">0</b></span>
     </div>
     <button class="btn warn tiny" id="fWipe">Reset progress</button>
+  </footer>
+</div>
+
+<!-- Frontier: pick a sector -->
+<div class="veil sheet hidden" id="sectors">
+  <header>
+    <div class="ftitle">
+      <h1>Frontier</h1>
+      <span>Every sector is a seeded map: the same ground every time you fly it. Raze the enemy HQ to open the next.</span>
+    </div>
+    <div class="fbank"><b id="sCleared">0</b><span>sectors razed</span></div>
+    <button class="btn" id="sClose">Close</button>
+  </header>
+
+  <div class="fgrid" id="sList"></div>
+
+  <footer>
+    <div class="fstats" id="sHelp">
+      <span>Drag to scroll · pinch or wheel to zoom · tap the minimap to jump</span>
+    </div>
   </footer>
 </div>
 
