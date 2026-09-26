@@ -17,6 +17,9 @@ import * as recorder from './recorder.js';
 import { sfx } from './audio.js';
 
 export const S = {
+  /** Which simulation owns the run: 'holdout' (this module) or 'frontier'. */
+  mode: 'holdout',
+
   // run economy
   gold: 0,
   score: 0,
@@ -98,6 +101,7 @@ const bump = (bag, key, by = 1) => { bag[key] = (bag[key] || 0) + by; };
  * switch.
  */
 export function newRun({ headStart: useHeadStart = false } = {}) {
+  S.mode = 'holdout';
   resetField();
   S.gold = meta.mods.startGold;
   S.score = 0;

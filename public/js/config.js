@@ -234,6 +234,118 @@ export const SPAWN_TABLE = [
   { type: 'spectre', from: 15, weight: 5 }
 ];
 
+/* ══ Frontier ════════════════════════════════════════════════════════════
+   The second mode, opened by holding wave 100 in Holdout. A seeded map of
+   low ground, hills and plateaus replaces the grid; enemies march out of a
+   base on the far side, pick their own route, and shoot back. You answer
+   with counter-waves of your own units. Same towers, same Foundry, same
+   Cores - only the battlefield is new.                                   */
+
+/** Holdout wave that opens Frontier. Developer mode skips the wait. */
+export const FRONTIER_UNLOCK_WAVE = 100;
+
+/** Map size in cells. Bigger than a screen on purpose: you scroll it. */
+export const MAP_W = 52, MAP_H = 32;
+
+/** Terrain classes. Heights 0-2 are land; a cliff separates two heights
+    unless one side is a ramp. Water only lets flyers over. */
+export const WATER = -1;
+
+/** Every sector plays like Holdout this many waves deep, from its wave 1. */
+export const sectorDepth = s => 10 * s;
+/** Wave number the enemy stats, gold and points are read at. */
+export const threatOf = (s, w) => sectorDepth(s) + w;
+
+/** Towers on higher ground see further: this much range per height. */
+export const HIGH_GROUND_RANGE = 0.12;
+/** Cells from the HQ, or from any of your towers, where you may build. */
+export const BUILD_REACH = 5;
+/** No building this close to the enemy HQ. */
+export const ENEMY_KEEP_OUT = 8;
+
+/** Each HQ is a 3x3 block; this is its half-width in cells. */
+export const HQ_HALF = 1.5;
+/** Integrity of your HQ before Reinforced Core. */
+export const HQ_INTEGRITY = 100;
+/** Integrity each Reinforced Core rank adds in Frontier. */
+export const HQ_INTEGRITY_PER_CORE = 25;
+
+/** How much a tower standing on a cell costs a walker's route planner:
+    going through means stopping to knock it down. */
+export const TOWER_PATH_COST = 14;
+/** Extra route cost per tower covering a cell, for cautious walkers. */
+export const DANGER_COST = 1.4;
+
+/* ── structure health ─────────────────────────────────────────────────────
+   In Frontier your towers can be shot. Health grows with level and with
+   the threat, the same way enemy weapons do, and every tower is patched
+   back to full at the end of each wave it survives. A tower that falls is
+   gone - there is no refund on rubble.                                   */
+export const TOWER_HP = { gun: 220, rocket: 260, laser: 240, frost: 260, tesla: 280, portal: 320, factory: 300 };
+export const TOWER_HP_LEVEL = 1.35;
+/** Enemy weapons and structure health both climb this much per threat. */
+export const ARMS_GROWTH = 1.10;
+
+/* ── how each enemy fights back ───────────────────────────────────────────
+   `arm` is the weapon (null = unarmed). `siege` walkers stop to fire at a
+   tower in reach; everyone else shoots on the move. `bold` walkers ignore
+   your kill zones when they plan a route; the rest go around if they can.
+   `breach` is the integrity a foe knocks off your HQ when it gets there.  */
+export const FOE_ARMS = {
+  grunt:   { arm: { range: 2.0, dmg: 5,  rate: 0.9 },             breach: 4 },
+  runner:  { arm: null,                                          breach: 4,  bold: true },
+  tank:    { arm: { range: 3.0, dmg: 26, rate: 1.8, siege: true }, breach: 10 },
+  flyer:   { arm: { range: 1.1, dmg: 16, rate: 1.4 },            breach: 6 },
+  bulwark: { arm: null,                                          breach: 8,  bold: true },
+  swarm:   { arm: { range: 0.7, dmg: 2,  rate: 0.5 },            breach: 1 },
+  spectre: { arm: { range: 2.4, dmg: 9,  rate: 0.5 },            breach: 8 },
+  titan:   { arm: { range: 3.6, dmg: 90, rate: 2.4, siege: true }, breach: 35, bold: true }
+};
+/** An unarmed walker blocked by a tower batters it for this, scaled. */
+export const RAM_DMG = 6;
+
+/* ── your units ───────────────────────────────────────────────────────────
+   Bought into a squad between waves; the squad marches on the enemy base
+   when the next wave is sent (or straight away, with Deploy). A unit is
+   issued at the current threat, so late recruits hit harder and cost
+   more. `role` decides what it stops for:
+     escort - fights anything hostile in reach, structures last
+     raider - ignores enemy troops and runs for the buildings
+     siege  - prefers structures, fights troops only when nothing else is
+   `vsBase` multiplies damage against bunkers and the HQ.                */
+export const UNITS = {
+  trooper: { name: 'Trooper', cost: 45,  hp: 150, spd: 1.25, range: 2.2, dmg: 15,  rate: 0.55, vsBase: 1,   role: 'escort', col: '#a8ecbb', blurb: 'rifles · fights anything' },
+  striker: { name: 'Striker', cost: 80,  hp: 95,  spd: 2.5,  range: 1.9, dmg: 28,  rate: 0.5,  vsBase: 1.5, role: 'raider', col: '#ffe08a', blurb: 'fast · runs for buildings' },
+  breaker: { name: 'Breaker', cost: 190, hp: 560, spd: 0.8,  range: 3.0, dmg: 110, rate: 1.8,  vsBase: 2.5, role: 'siege',  col: '#f4a259', blurb: 'siege tank · wrecks bases', splash: 0.9 }
+};
+export const UNIT_ORDER = ['trooper', 'striker', 'breaker'];
+/** Unit power per threat - a little under enemy health, so waiting is no
+    free lunch, but a unit bought late is still a unit worth having. */
+export const UNIT_GROWTH = 1.12;
+/** Unit price per threat, linear like gold. */
+export const unitCost = (key, threat) => Math.round(UNITS[key].cost * (1 + 0.05 * threat) / 5) * 5;
+/** Most units you can have alive and queued at once. Numbers alone must
+    not raze a base on wave 1; the threat has to grow into your kit. */
+export const UNIT_CAP = 16;
+/** In-run Armory: each level multiplies unit health and damage. Priced by
+    the threat as well, so a deep sector's war chest cannot buy it out. */
+export const ARMORY_MUL = 1.22;
+export const armoryCost = (l, threat) => Math.round(160 * Math.pow(1.5, l) * (1 + 0.05 * threat) / 5) * 5;
+
+/* ── the enemy base ───────────────────────────────────────────────────────
+   Static for now: an HQ and a ring of bunkers, sized by sector. It never
+   rebuilds. Raze the HQ and the sector is yours.                        */
+/** Your units grow with the threat and the base does not, so every base
+    ripens eventually. Sector 1 is ripe around wave 10; each sector after
+    holds out two waves longer, and those waves are deeper ones.       */
+export const baseRipeWave = s => 8 + 2 * s;
+export const baseScale = s => Math.pow(UNIT_GROWTH, sectorDepth(s) + baseRipeWave(s));
+export const ENEMY_HQ_HP = 60000;
+export const BUNKER = { hp: 5000, range: 3.4, dmg: 60, rate: 1.2 };
+export const bunkerCount = s => Math.min(7, 2 + Math.ceil(s / 2));
+/** Cores for razing a sector's base, on top of everything else. */
+export const sectorBounty = s => Math.round(18 * wavePoints(sectorDepth(s) + 20));
+
 /* ── the Foundry: permanent upgrades bought with Cores ────────────────────
    Every node is `max` levels deep and costs base * growth^level, rounded to
    the nearest 5. `value` renders the running total at a given level so the
@@ -392,6 +504,27 @@ export const FOUNDRY = [
         step: '+10% points earned',
         blurb: 'Every run funds the Foundry faster.',
         value: l => `+${10 * l}% points` }
+    ]
+  },
+  {
+    id: 'field', name: 'Field Command', hint: 'Frontier only: units, walls and reach.',
+    nodes: [
+      { id: 'drill',    name: 'Drill Sergeants',   max: ENDLESS, base: 900, growth: 1.50, minWave: FRONTIER_UNLOCK_WAVE,
+        step: '+8% unit damage',
+        blurb: 'Every Trooper, Striker and Breaker you field hits harder.',
+        value: l => `+${8 * l}% unit damage` },
+      { id: 'plating',  name: 'Composite Plating', max: ENDLESS, base: 900, growth: 1.50, minWave: FRONTIER_UNLOCK_WAVE,
+        step: '+8% unit health',
+        blurb: 'Your counter-waves live long enough to reach the bunkers.',
+        value: l => `+${8 * l}% unit health` },
+      { id: 'hardened', name: 'Hardened Emplacements', max: ENDLESS, base: 800, growth: 1.45, minWave: FRONTIER_UNLOCK_WAVE,
+        step: '+10% tower health',
+        blurb: 'In Frontier the enemy shoots back. Thicker plating keeps your turrets standing.',
+        value: l => `+${10 * l}% tower health` },
+      { id: 'depots',   name: 'Forward Depots',    max: 4, base: 1500, growth: 1.8, minWave: FRONTIER_UNLOCK_WAVE,
+        step: '+1 build reach',
+        blurb: 'Build further out from the HQ and from each of your towers.',
+        value: l => `${BUILD_REACH + l} cells of build reach` }
     ]
   }
 ];

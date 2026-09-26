@@ -194,15 +194,24 @@ function drawAura(t) {
 }
 
 function drawTower(t, ghost) {
+  drawTurret(ctx, px(cx(t.i) + 0.5), py(cy(t.i) + 0.5), cell, t, ghost);
+}
+
+/**
+ * One turret, centred on (x, y) in a cell `size` pixels wide. Exported so
+ * Frontier draws exactly the same turrets on its own map.
+ */
+export function drawTurret(g, x, y, size, t, ghost) {
+  const ctx = g, cell = size;
   const def = TOWERS[t.k];
-  const x = px(cx(t.i) + 0.5), y = py(cy(t.i) + 0.5), s = cell * 0.40;
+  const s = cell * 0.40;
 
   ctx.save();
   ctx.translate(x, y);
   ctx.fillStyle = '#18222c';
   ctx.strokeStyle = def.color;
   ctx.lineWidth = 1.4;
-  roundRect(-s, -s, s * 2, s * 2, cell * 0.12);
+  roundRect(ctx, -s, -s, s * 2, s * 2, cell * 0.12);
   ctx.fill();
   ctx.stroke();
 
@@ -441,8 +450,14 @@ function drawBanners() {
 }
 
 function drawFoe(e) {
+  drawEnemy(ctx, px(e.x), py(e.y), cell, e);
+}
+
+/** One enemy at (x, y), in a cell `size` pixels wide. Shared with Frontier. */
+export function drawEnemy(g, x, y, size, e) {
+  const ctx = g, cell = size;
   const d = e.def;
-  const x = px(e.x), y = py(e.y), r = cell * d.rad;
+  const r = cell * d.rad;
 
   if (d.fly) {
     ctx.fillStyle = 'rgba(0,0,0,.28)';
@@ -516,7 +531,7 @@ function drawFoe(e) {
   }
 }
 
-function roundRect(x, y, w, h, r) {
+function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);

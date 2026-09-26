@@ -1,8 +1,14 @@
 # Turret Trouble
 
-A grid tower-defence game that runs entirely in the browser — no build step, no
-dependencies, no framework. Enemies walk from the left gate to the right gate;
-you build turrets to stop them.
+A tower-defence game that runs entirely in the browser — no build step, no
+dependencies, no framework. It has two modes:
+
+- **Holdout** — the grid. Enemies walk from the left gate to the right gate;
+  you build turrets to stop them, wave after wave.
+- **Frontier** — opens once you have held wave 100 in Holdout. Seeded maps
+  with hills, cliffs and ramps; enemies that choose their own road and shoot
+  back; and an enemy base on the far side that you raze with counter-waves
+  of your own units. See [Frontier](#frontier) below.
 
 The twist is the **Foundry**: holding a wave scores points on top of the gold
 it pays, and those points survive the run. Between runs you spend them on
@@ -31,7 +37,7 @@ tower types.
   not dim and sleep mid-wave. The menu, the summary and a paused run release
   it. (Browsers only grant it over HTTPS or on localhost.)
 
-Keyboard: `1`–`7` pick a tower, `space` sends a wave, `P` pauses, `F` opens the
+Keyboard (Frontier adds `G` deploy, `H` home and arrow/WASD scrolling): `1`–`7` pick a tower, `space` sends a wave, `P` pauses, `F` opens the
 Foundry, `B` opens Blueprints, `Esc` clears the selection or closes whichever
 sheet is open, `Shift+D` toggles developer mode.
 
@@ -79,7 +85,7 @@ shows a badge in the panel. The setting is remembered in `localStorage`; press
 
 ### The Foundry
 
-Twenty-eight upgrade nodes across four branches. Most of the scaling nodes
+Thirty-two upgrade nodes across five branches. Most of the scaling nodes
 are **endless**: instead of filling up and reading "Fully upgraded" they show
 their rank (`lvl 12`) and keep going, each rank costing a fixed multiple of the
 last. Only Long Barrels, Reinforced Core, Overdrive and Rapid Deployment keep a
@@ -108,6 +114,10 @@ what is left), and Overcharge adds crit damage once crit chance reaches 100%.
   start and summary screens offer two buttons — **wave 1** or **Head start**
   — so every run is an explicit choice. Replaying a blueprint picks the same
   opening the build was recorded on, and Data Siphon.
+
+- **Field Command** — Frontier only, and only once wave 100 is held: Drill
+  Sergeants (unit damage), Composite Plating (unit health), Hardened
+  Emplacements (tower health) and Forward Depots (build reach).
 
 Progress lives in `localStorage` under `turret-trouble:profile:v1`. "Reset
 progress" in the Foundry footer wipes it.
@@ -145,6 +155,71 @@ Blueprints live in `localStorage` under `turret-trouble:blueprints:v1`, separate
 from the Foundry profile — resetting progress leaves your builds alone, and
 "Delete all" in the blueprint footer wipes those without touching your Cores.
 
+## Frontier
+
+Holdout teaches you the towers. Frontier is where they go to war. It opens
+when your best Holdout wave reaches 100 (developer mode opens it straight
+away, for testing). Same towers, same prices, same Foundry, and every point
+scored lands in the same Cores bank - so a sortie is also a way to fund the
+next Holdout run.
+
+**The map.** A sector is a 52 × 32 map generated from a seed: water, low
+ground, hills and plateaus. Cliffs separate heights and only ramps (the
+hatched cells) cross them, so the terrain decides the roads. The same sector
+is the same map every time; the next sector is a new seed. Drag to scroll,
+pinch or wheel to zoom, tap the minimap to jump, `H` or *Centre on HQ* to come
+home. Arrow keys and WASD scroll too.
+
+**Building.** Towers go on any land within build reach (5 cells) of your HQ
+or of a tower you already own, so a line can creep outwards. Towers on high
+ground get +12% range per height. Nothing can be built near the enemy base.
+
+**Smarter enemies.** Waves leave the enemy HQ and plan their own route every
+time the board changes:
+
+- *cautious* walkers go around your towers' fields of fire when another road
+  exists - build a kill zone and watch them take the long way;
+- *bold* ones (Runners, Bulwarks, Titans, and a share of everyone else) take
+  the short road through it;
+- nothing is ever sealed in: a tower standing on the only road is simply in
+  the way, and whoever reaches it stops and knocks it down.
+
+Most enemies are armed and shoot back - Grunts and Spectres on the move,
+Tanks and Titans stop to shell a tower in reach. Towers have health, are
+patched back to full after every wave they survive, and are lost for good
+(no refund) when destroyed. A walker that reaches your HQ knocks integrity off
+it; Reinforced Core adds integrity and Field Repair patches it.
+
+**Counter-waves.** The Barracks in the side panel buys units into a squad that
+waits at your HQ. The squad marches on the enemy base when you send the next
+wave (or at once, with *Deploy now*, `G`); *Disband* refunds a squad that has
+not left yet. Three kinds:
+
+| unit | role |
+|---|---|
+| **Trooper** | escort — fights anything hostile in reach |
+| **Striker** | raider — fast, ignores enemy troops, runs for the buildings |
+| **Breaker** | siege tank — slow, heavy splash, ×2.5 against structures |
+
+A unit is issued at the current threat, so late recruits are stronger and
+dearer; the in-run **Armory** multiplies the kit of every unit fielded after
+it. At most 16 units can be out or queued at once.
+
+**The enemy base** is static for now: an HQ and a ring of bunkers on the
+approach roads, sized by sector. It never rebuilds, and your units grow with
+every wave while it does not - sector 1 ripens around wave 10, each sector
+after holds two waves longer. Raze the HQ to win the sector, bank its bounty,
+and open the next one. Sector *s* plays at Holdout depth 10 × *s*: its wave 1
+has the health, gold and points of Holdout wave 10*s* + 1, and opens with a
+war chest of the six waves before it.
+
+The knobs live in the Frontier block of `config.js`, and a scripted sortie
+prints its curve with:
+
+```bash
+npm run probe:frontier
+```
+
 ## Running locally
 
 ```bash
@@ -172,7 +247,7 @@ better outcome.
 
 ```bash
 npm run check   # parse every module
-npm test        # headless: economy, pathing, unlocks, persistence, replay
+npm test        # headless: economy, pathing, unlocks, persistence, replay, Frontier
 npm run balance # headless balance probe, prints the per-wave curve
 ```
 
@@ -191,6 +266,9 @@ public/
     meta.js               Foundry state and the derived modifier bundle
     recorder.js           build-order tapes, the blueprint library, replay
     field.js              grid occupancy and the BFS flow field
+    terrain.js            Frontier: seeded map generation and the route planner
+    frontier.js           Frontier: the simulation (towers, units, bases)
+    frontier-render.js    Frontier: camera, terrain painting, minimap
     waves.js              wave composition
     audio.js              synthesised sound cues
     game.js               the simulation; owns all run state
@@ -202,12 +280,18 @@ test/
   smoke.mjs               headless run of the simulation, no DOM required
   recorder.mjs            headless test of recording, replay and its limits
   balance.mjs             plays a full run and prints the economy curve
+  frontier.mjs            terrain, routing, fire-back, units and victory; --probe
 archive/
   grid-siege-v1.html      the original single-file version, kept for reference
 ```
 
-The dependency direction is one-way: `config` → `field`/`meta`/`recorder` →
-`game` → `render`/`ui` → `main`. `recorder.js` never imports the simulation:
+The dependency direction is one-way: `config` → `field`/`terrain`/`meta`/
+`recorder` → `game` → `frontier` → `render`/`frontier-render`/`ui` → `main`.
+Both simulations share the run state `S` (gold, score, the wave clock, speed,
+projectiles), which is how the side panel, the Foundry and the menus serve
+both modes; `S.mode` says which one is driving. Frontier keeps its own board,
+units and bases on `F`, and reuses Holdout's tower maths and turret drawings
+so a Gun is the same Gun in both. `recorder.js` never imports the simulation:
 `game.js` hands itself over with `bindGame()`, the same trick `bindProjection()`
 uses for the renderer. `game.js` never touches the DOM; it exposes a single
 `S.onChange` hook that `main.js` points at the UI.

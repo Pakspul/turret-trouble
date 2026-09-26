@@ -4,7 +4,10 @@
 
 import { field } from './field.js';
 import { S, newRun, startWave, place, clearGrid, update, cycleSpeed, endRecording } from './game.js';
+import * as frontier from './frontier.js';
+import { F } from './frontier.js';
 import * as render from './render.js';
+import * as frender from './frontier-render.js';
 import * as ui from './ui.js';
 import * as meta from './meta.js';
 import * as recorder from './recorder.js';
@@ -16,6 +19,7 @@ const stage = document.getElementById('stage');
 meta.init();
 recorder.init();
 render.init(canvas, stage);
+frender.init(canvas, stage);
 
 // The simulation fires onChange on every kill, so coalesce to one DOM pass
 // per frame rather than one per event.
@@ -29,6 +33,7 @@ const live = () => S.phase !== 'menu' && S.phase !== 'dead';
 /** Bank what a run earned when the player walks away from it. */
 function leaveRun() {
   if (!live()) return;
+  if (S.mode === 'frontier') { frontier.leave(); return; }
   meta.noteRunEnd(S.wavesCleared, S.score);
   // Walking away from a run still banks its build order.
   endRecording();
@@ -47,7 +52,24 @@ ui.actions.play = ({ headStart = false } = {}) => {
   ui.sync();
 };
 
-ui.actions.startWave = () => startWave();
+/** Fly a Frontier sector. */
+ui.actions.frontier = sector => {
+  audio.unlock();
+  leaveRun();
+  ui.hideStart();
+  ui.closeSectors();
+  ui.el('over').classList.add('hidden');
+  ui.el('btnPause').textContent = 'Pause';
+  frontier.newSortie(sector);
+  frender.layout();
+  frender.home();
+  dirty = false;
+  ui.sync();
+};
+
+ui.actions.home = () => { if (S.mode === 'frontier' && F.map) frender.home(); };
+
+ui.actions.startWave = () => (S.mode === 'frontier' ? frontier.startWave() : startWave());
 ui.actions.clearGrid = () => clearGrid();
 
 ui.actions.togglePause = () => {
@@ -93,6 +115,10 @@ ui.actions.abandon = () => {
 ui.actions.replay = id => {
   recorder.arm(id);
   ui.closeTapes();
+
+  // Blueprints are Holdout build orders: from a Frontier sortie they wait
+  // for the next Holdout run.
+  if (S.mode === 'frontier' && live()) { ui.syncArmed(); ui.sync(); return; }
 
   if (S.phase === 'menu' || S.phase === 'dead') {
     // A build recorded after a Head Start opens its first step past wave 0,
@@ -177,6 +203,7 @@ let dragging = false;
 canvas.addEventListener('pointerdown', ev => {
   ev.preventDefault();
   audio.unlock();
+  if (S.mode === 'frontier') { mapDown(ev); return; }
   if (S.phase === 'menu' || S.phase === 'dead') return;
 
   const i = render.cellAt(ev);
@@ -193,10 +220,12 @@ canvas.addEventListener('pointerdown', ev => {
 });
 
 canvas.addEventListener('pointermove', ev => {
+  if (S.mode === 'frontier') { mapMove(ev); return; }
   if (S.picked && (dragging || ev.pointerType === 'mouse')) S.hover = render.cellAt(ev);
 });
 
 canvas.addEventListener('pointerup', ev => {
+  if (S.mode === 'frontier') { mapUp(ev); return; }
   if (!dragging) return;
   dragging = false;
   const i = render.cellAt(ev);
@@ -211,8 +240,132 @@ canvas.addEventListener('pointerup', ev => {
 // layout out of the viewport.
 document.addEventListener('gesturestart', ev => ev.preventDefault(), { passive: false });
 
-canvas.addEventListener('pointercancel', () => { dragging = false; S.hover = -1; });
-canvas.addEventListener('pointerleave', () => { if (!dragging) S.hover = -1; });
+canvas.addEventListener('pointercancel', ev => {
+  dragging = false;
+  S.hover = -1;
+  pointers.delete(ev.pointerId);
+  if (!pointers.size) gesture = null;
+});
+canvas.addEventListener('pointerleave', () => { if (!dragging && !gesture) S.hover = -1; });
+
+/* ── Frontier: a map you can drag, pinch and wheel ────────────────────────
+   One finger (or the left button) drags the map; a tap selects a tower.
+   With a tower picked, the finger places it instead - a second finger, or
+   the right mouse button, still moves the map. Tapping the minimap jumps
+   there.                                                                */
+const pointers = new Map();
+let gesture = null;
+/** Pixels a press may wander before it counts as a drag, not a tap. */
+const TAP_SLOP = 7;
+
+function pinchSpan() {
+  const [a, b] = [...pointers.values()];
+  return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+function mapDown(ev) {
+  if (S.phase === 'menu' || !F.map) return;
+  const p = frender.local(ev);
+  pointers.set(ev.pointerId, p);
+  try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
+
+  if (pointers.size >= 2) {
+    gesture = { mode: 'pinch', ...pinchSpan() };
+    S.hover = -1;
+    return;
+  }
+  const mini = frender.miniHit(ev);
+  if (mini) { frender.focus(mini.x, mini.y); gesture = { mode: 'mini' }; return; }
+
+  const panButton = ev.pointerType === 'mouse' && ev.button !== 0;
+  const mode = S.picked && !panButton && S.phase !== 'dead' ? 'place' : 'pan';
+  gesture = { mode, x0: p.x, y0: p.y, last: p, moved: false };
+  if (mode === 'place') S.hover = frender.cellAt(ev);
+}
+
+function mapMove(ev) {
+  if (!F.map) return;
+  const p = frender.local(ev);
+  if (!pointers.has(ev.pointerId)) {
+    // A hovering mouse previews the placement.
+    if (S.picked && ev.pointerType === 'mouse' && !gesture) S.hover = frender.cellAt(ev);
+    return;
+  }
+  pointers.set(ev.pointerId, p);
+  if (!gesture) return;
+
+  if (gesture.mode === 'pinch' && pointers.size >= 2) {
+    const now = pinchSpan();
+    frender.zoomAt(now.x, now.y, now.d / gesture.d);
+    frender.pan(now.x - gesture.x, now.y - gesture.y);
+    Object.assign(gesture, now);
+  } else if (gesture.mode === 'mini') {
+    const mini = frender.miniHit(ev);
+    if (mini) frender.focus(mini.x, mini.y);
+  } else if (gesture.mode === 'pan') {
+    if (!gesture.moved && Math.hypot(p.x - gesture.x0, p.y - gesture.y0) > TAP_SLOP) gesture.moved = true;
+    if (gesture.moved) frender.pan(p.x - gesture.last.x, p.y - gesture.last.y);
+    gesture.last = p;
+  } else if (gesture.mode === 'place') {
+    S.hover = frender.cellAt(ev);
+  }
+}
+
+function mapUp(ev) {
+  pointers.delete(ev.pointerId);
+  const g = gesture;
+  if (!g) return;
+  if (g.mode === 'pinch') {
+    // Lifting one finger of a pinch must not drop a tower or select one.
+    if (!pointers.size) gesture = null;
+    else gesture = { mode: 'idle' };
+    return;
+  }
+  gesture = null;
+  if (g.mode === 'pan' && !g.moved && S.phase !== 'dead') {
+    const i = frender.cellAt(ev);
+    S.selected = i >= 0 ? F.grid[i] || null : null;
+    ui.sync();
+  } else if (g.mode === 'place') {
+    const i = frender.cellAt(ev);
+    if (i >= 0) {
+      if (F.grid[i]) { S.selected = F.grid[i]; ui.sync(); }
+      else frontier.place(i, S.picked);
+    }
+    if (ev.pointerType !== 'mouse') S.hover = -1;
+  }
+}
+
+canvas.addEventListener('wheel', ev => {
+  if (S.mode !== 'frontier' || !F.map) return;
+  ev.preventDefault();
+  const p = frender.local(ev);
+  frender.zoomAt(p.x, p.y, Math.exp(-ev.deltaY * 0.0015));
+}, { passive: false });
+
+canvas.addEventListener('contextmenu', ev => { if (S.mode === 'frontier') ev.preventDefault(); });
+
+/* Arrow keys and WASD scroll the Frontier map. */
+const held = new Set();
+const PAN_KEYS = {
+  ArrowLeft: [-1, 0], a: [-1, 0], A: [-1, 0], ArrowRight: [1, 0], d: [1, 0],
+  ArrowUp: [0, -1], w: [0, -1], W: [0, -1], ArrowDown: [0, 1], s: [0, 1], S: [0, 1]
+};
+addEventListener('keydown', ev => {
+  if (S.mode !== 'frontier' || ev.shiftKey || !PAN_KEYS[ev.key]) return;
+  if (ev.key.startsWith('Arrow')) ev.preventDefault();
+  held.add(ev.key);
+});
+addEventListener('keyup', ev => held.delete(ev.key));
+addEventListener('blur', () => held.clear());
+
+function keyPan(dt) {
+  if (!held.size || S.mode !== 'frontier' || S.suspended) return;
+  let dx = 0, dy = 0;
+  for (const k of held) { dx += PAN_KEYS[k][0]; dy += PAN_KEYS[k][1]; }
+  const speed = 900 * dt;
+  frender.pan(-dx * speed, -dy * speed);
+}
 
 /* ── frame loop ───────────────────────────────────────────────────────── */
 let last = performance.now();
@@ -224,7 +377,9 @@ function frame(now) {
   last = now;
 
   const steps = S.paused ? 0 : S.speed;
-  for (let k = 0; k < steps; k++) update(dt);
+  const step = S.mode === 'frontier' ? frontier.update : update;
+  for (let k = 0; k < steps; k++) step(dt);
+  keyPan(dt);
 
   if (S.phase === 'dead' && !wasDead) { wasDead = true; ui.showGameOver(); }
   if (S.phase !== 'dead') wasDead = false;
@@ -232,7 +387,8 @@ function frame(now) {
   if (dirty) { dirty = false; ui.sync(); }
   syncWakeLock();
 
-  render.draw();
+  if (S.mode === 'frontier') frender.draw();
+  else render.draw();
   requestAnimationFrame(frame);
 }
 

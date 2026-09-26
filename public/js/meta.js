@@ -4,7 +4,8 @@
 
 import {
   NODES, nodeCost, nodeMinWave, TOWERS,
-  BASE_START_GOLD, BASE_LIVES, BREAK_SECONDS,
+  BASE_START_GOLD, BASE_LIVES, BREAK_SECONDS, FRONTIER_UNLOCK_WAVE,
+  HQ_INTEGRITY, HQ_INTEGRITY_PER_CORE, BUILD_REACH,
   overdriveTop, speedSteps, requisitionMul, critChance, critMult
 } from './config.js';
 import * as store from './storage.js';
@@ -12,7 +13,9 @@ import * as store from './storage.js';
 const BLANK = () => ({
   cores: 0,
   levels: {},
-  stats: { bestWave: 0, runs: 0, kills: 0, lifetimePoints: 0, bestScore: 0 }
+  stats: { bestWave: 0, runs: 0, kills: 0, lifetimePoints: 0, bestScore: 0 },
+  /** Frontier: highest sector razed, and how many sorties were flown. */
+  frontier: { cleared: 0, runs: 0, bestWaves: 0 }
 });
 
 export const profile = BLANK();
@@ -84,6 +87,20 @@ export function noteKill() {
   profile.stats.kills++;
 }
 
+/** Frontier opens once Holdout has been held to wave 100 (or in dev mode). */
+export function frontierUnlocked(dev = false) {
+  return dev || profile.stats.bestWave >= FRONTIER_UNLOCK_WAVE;
+}
+
+/** Bank a finished Frontier sortie. Holdout's best wave is left alone. */
+export function noteFrontierEnd(sector, won, waves) {
+  const f = profile.frontier;
+  f.runs++;
+  f.bestWaves = Math.max(f.bestWaves, waves);
+  if (won) f.cleared = Math.max(f.cleared, sector);
+  persist();
+}
+
 /** True once Head Start is owned, so a new run can open past wave 1. */
 export function headStartOwned() {
   return mods.skipWaves > 0;
@@ -132,7 +149,14 @@ export function recompute() {
     recon:       has('recon'),
     breakTime:   Math.max(0, BREAK_SECONDS - lv('drills')),
     skipWaves:   10 * lv('headstart'),
-    speeds:      speedSteps(overdriveTop(lv('overdrive')))
+    speeds:      speedSteps(overdriveTop(lv('overdrive'))),
+
+    // Frontier: Reinforced Core thickens the HQ instead of adding hearts.
+    integrity:   HQ_INTEGRITY + HQ_INTEGRITY_PER_CORE * lv('core'),
+    unitDmg:     1 + 0.08 * lv('drill'),
+    unitHp:      1 + 0.08 * lv('plating'),
+    towerHp:     1 + 0.10 * lv('hardened'),
+    buildReach:  BUILD_REACH + lv('depots')
   });
 
   revision.n++;
@@ -180,6 +204,7 @@ export function init() {
       profile.levels[id] = Math.max(0, Math.min(NODES[id].max, Number(value) || 0));
     }
     Object.assign(profile.stats, BLANK().stats, saved.stats || {});
+    profile.frontier = Object.assign(BLANK().frontier, saved.frontier || {});
     // Older saves carry a `headStartOff` switch; the choice is now made per
     // run on the start screen, so it is dropped here.
   }
@@ -191,6 +216,7 @@ export function resetProfile() {
   profile.cores = blank.cores;
   profile.levels = blank.levels;
   profile.stats = blank.stats;
+  profile.frontier = blank.frontier;
   recompute();
   store.wipe();
   store.save(profile);
