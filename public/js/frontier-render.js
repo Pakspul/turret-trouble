@@ -1,14 +1,16 @@
 /* ══ Frontier renderer ═══════════════════════════════════════════════════
-   Draws the Frontier map through a camera you can drag and zoom. Terrain
-   is painted once per map into an offscreen canvas and blitted each frame;
-   everything that moves is drawn on top in world coordinates (cells) and
-   projected here. Turrets and enemies are Holdout's own drawings, so the
-   two modes read as one game. Reads state; never writes it.             */
+   Draws the Frontier map through a camera you can drag and zoom, or let
+   follow your Commander. Terrain is painted once per map into an offscreen
+   canvas and blitted each frame; everything that moves is drawn on top in
+   world coordinates (cells) and projected here. Turrets are Holdout's own
+   drawings, so the two modes read as one game. Your side is blue, the
+   enemy's red. Reads state; never writes it.                            */
 
-import { TOWERS, MAP_W, MAP_H, HQ_HALF, WATER } from './config.js';
+import { TOWERS, MAP_W, MAP_H, WATER, UNITS, COMMANDER } from './config.js';
 import { S } from './game.js';
-import { F, canBuild, rangeOf, buildCost } from './frontier.js';
-import { drawTurret, drawEnemy } from './render.js';
+import { F, canBuild, rangeOf, buildCost, ringOf, whyNot, commanderOf } from './frontier.js';
+import * as meta from './meta.js';
+import { drawTurret } from './render.js';
 import { at, colOf, rowOf } from './terrain.js';
 
 let cv, ctx, stage;
@@ -19,6 +21,9 @@ export const cam = { x: MAP_W / 2, y: MAP_H / 2, z: 32 };
 
 const sx = x => (x - cam.x) * cam.z + W / 2;
 const sy = y => (y - cam.y) * cam.z + H / 2;
+
+const BLUE = '#4cc9f0', RED = '#ff5f6d';
+const sideCol = side => (side ? RED : BLUE);
 
 export function init(canvas, host) {
   cv = canvas;
@@ -51,16 +56,32 @@ function clamp() {
   cam.y = hh * 2 >= MAP_H ? MAP_H / 2 : Math.max(hh, Math.min(MAP_H - hh, cam.y));
 }
 
-/** Frame your HQ at a comfortable zoom - called when a sortie opens. */
+/** Frame your Commander at a comfortable zoom - called when a sortie opens. */
 export function home() {
-  cam.z = Math.max(22, Math.min(36, W / 26));
-  cam.x = F.hq.x + W / cam.z * 0.3;
-  cam.y = F.hq.y;
+  const c = commanderOf(0);
+  cam.z = Math.max(24, Math.min(40, W / 22));
+  if (c) { cam.x = c.x + W / cam.z * 0.15; cam.y = c.y; }
   clamp();
 }
 
 export function focus(x, y) {
   cam.x = x; cam.y = y;
+  clamp();
+}
+
+/** Ease the camera after your Commander while follow is on. It only moves
+    once the Commander walks out of the middle of the view, so building
+    beside it does not swim the whole map about. */
+export function follow(dt) {
+  const c = commanderOf(0);
+  if (!F.follow || !c || c.dead || !W) return;
+  const hw = W / 2 / cam.z, hh = H / 2 / cam.z;
+  const box = 0.35;
+  const dx = c.x - cam.x, dy = c.y - cam.y;
+  const ox = Math.abs(dx) - hw * box, oy = Math.abs(dy) - hh * box;
+  const k = Math.min(1, dt * 5);
+  if (ox > 0) cam.x += Math.sign(dx) * ox * k;
+  if (oy > 0) cam.y += Math.sign(dy) * oy * k;
   clamp();
 }
 
@@ -87,20 +108,26 @@ export function local(ev) {
   return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
 }
 
+/** Pointer -> world point, in cells. */
+export function worldAt(ev) {
+  const p = local(ev);
+  return { x: (p.x - W / 2) / cam.z + cam.x, y: (p.y - H / 2) / cam.z + cam.y };
+}
+
 /** Pointer -> map cell index, or -1 off the map. */
 export function cellAt(ev) {
-  const p = local(ev);
-  const x = Math.floor((p.x - W / 2) / cam.z + cam.x);
-  const y = Math.floor((p.y - H / 2) / cam.z + cam.y);
+  const w = worldAt(ev);
+  const x = Math.floor(w.x), y = Math.floor(w.y);
   if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return -1;
   return at(x, y);
 }
 
-/* ── minimap ──────────────────────────────────────────────────────────── */
+/* ── minimap ──────────────────────────────────────────────────────────────
+   Top right: the bottom left belongs to the thumb stick.                 */
 function miniBox() {
-  const w = Math.round(Math.min(180, Math.max(110, W * 0.22)));
+  const w = Math.round(Math.min(170, Math.max(104, W * 0.2)));
   const h = Math.round(w * MAP_H / MAP_W);
-  return { x: 8, y: H - h - 8, w, h };
+  return { x: W - w - 8, y: 8, w, h };
 }
 
 /** A pointer on the minimap -> the world point it shows, or null. */
@@ -234,32 +261,23 @@ export function draw() {
 
   drawBuildZone();
   drawRoutes();
+  drawReach();
   drawSelection();
-  drawBase(F.hq, '#4cc9f0', 'HQ');
-  drawBase(F.enemy, '#ff5f6d', '');
-  for (const b of F.bunkers) if (!b.dead) drawBunker(b);
   drawWrecks();
 
-  const z = cam.z;
-  for (const t of F.towers) {
-    if (!visible(t.x, t.y)) continue;
-    drawAura(t);
-    drawTurret(ctx, sx(t.x), sy(t.y), z, t, false);
-    if (t.hp < t.max) bar(sx(t.x), sy(t.y) + z * 0.5, z * 0.8, t.hp / t.max, t.hit > 0);
-  }
+  for (const s of F.structs) if (s.type === 'fab') drawFactory(s);
+  for (const s of F.structs) if (s.type === 'helper') drawHelper(s);
+  for (const s of F.structs) if (s.type === 'tower') drawTower(s);
   drawBeams();
   drawPreview();
 
-  for (const u of F.units) if (visible(u.x, u.y)) drawUnit(u);
-  for (const e of S.foes) {
-    if (!visible(e.x, e.y)) continue;
-    drawEnemy(ctx, sx(e.x), sy(e.y), z, e);
-  }
+  for (const u of F.units) if (!u.def.fly && visible(u.x, u.y)) drawUnit(u);
+  for (const c of F.cmd) if (c && !c.dead) drawCommander(c);
+  for (const u of F.units) if (u.def.fly && visible(u.x, u.y)) drawUnit(u);
 
   drawArcs();
   drawWarps();
   drawShots();
-  drawBolts();
   drawBlasts();
   drawMotes();
   drawNotes();
@@ -270,133 +288,103 @@ export function draw() {
 }
 
 const visible = (x, y) => {
-  const m = 2;
+  const m = 2.5;
   return sx(x) > -m * cam.z && sx(x) < W + m * cam.z && sy(y) > -m * cam.z && sy(y) < H + m * cam.z;
 };
 
-function bar(x, y, w, frac, flash) {
+function bar(x, y, w, frac, flash, col) {
   const h = Math.max(2.5, cam.z * 0.07);
   ctx.fillStyle = 'rgba(0,0,0,.55)';
   ctx.fillRect(x - w / 2, y, w, h);
-  ctx.fillStyle = flash ? '#ffffff' : frac > 0.5 ? '#7ddf8f' : frac > 0.22 ? '#f2c14b' : '#ff5f6d';
-  ctx.fillRect(x - w / 2, y, w * Math.max(0, frac), h);
+  ctx.fillStyle = flash ? '#ffffff' : col || (frac > 0.5 ? '#7ddf8f' : frac > 0.22 ? '#f2c14b' : '#ff5f6d');
+  ctx.fillRect(x - w / 2, y, w * Math.max(0, Math.min(1, frac)), h);
 }
 
-/** While a tower is picked, tint every cell it could go on. */
+/** While a building is picked, tint every cell it could go on. */
 function drawBuildZone() {
   if (!S.picked) return;
   const z = cam.z;
   const x0 = Math.max(0, Math.floor(cam.x - W / 2 / z)), x1 = Math.min(MAP_W - 1, Math.ceil(cam.x + W / 2 / z));
   const y0 = Math.max(0, Math.floor(cam.y - H / 2 / z)), y1 = Math.min(MAP_H - 1, Math.ceil(cam.y + H / 2 / z));
-  ctx.fillStyle = 'rgba(76,201,240,.09)';
+  ctx.fillStyle = S.picked === 'helper' ? 'rgba(159,208,176,.22)' : 'rgba(76,201,240,.08)';
+  if (S.picked === 'helper') {
+    // Only the rings around your Factories take Helpers.
+    for (const f of F.structs) {
+      if (f.side || f.type !== 'fab') continue;
+      for (const i of ringOf(f)) if (canBuild(i)) ctx.fillRect(sx(colOf(i)) + 2, sy(rowOf(i)) + 2, z - 4, z - 4);
+    }
+    return;
+  }
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
-      if (canBuild(at(x, y))) ctx.fillRect(sx(x) + 1, sy(y) + 1, z - 2, z - 2);
+      const i = at(x, y);
+      if (F.map.height[i] >= 0 && !F.grid[i]) ctx.fillRect(sx(x) + 1, sy(y) + 1, z - 2, z - 2);
     }
   }
 }
 
-/** The roads the enemy plans to take: bright for the cautious plan, faint
-    for the bold one where it differs. */
-function drawRoutes() {
-  const start = at(F.enemy.cx - 2, F.enemy.cy);
+/** The Commander's build reach, and a line to the next order waiting. */
+function drawReach() {
+  const c = commanderOf(0);
+  if (!c || c.dead) return;
+  const pending = F.structs.filter(s => s.side === 0 && !s.done);
+  if (!S.picked && !pending.length && S.selected !== c) return;
+  const r = meta.mods.buildReach;
   ctx.save();
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.setLineDash([cam.z * 0.22, cam.z * 0.3]);
-  ctx.lineDashOffset = -(performance.now() / 26) % 1000;
-  for (const [plan, alpha] of [['bold', 0.14], ['cautious', 0.3]]) {
-    const flow = F.flow[plan];
-    if (!flow) continue;
-    let u = exitCell(flow, start), guard = 0;
-    if (u < 0) continue;
-    ctx.strokeStyle = `rgba(125,223,143,${alpha})`;
-    ctx.lineWidth = Math.max(2, cam.z * 0.1);
+  ctx.beginPath();
+  ctx.arc(sx(c.x), sy(c.y), r * cam.z, 0, 6.284);
+  ctx.fillStyle = 'rgba(76,201,240,.05)';
+  ctx.fill();
+  ctx.setLineDash([cam.z * 0.2, cam.z * 0.2]);
+  ctx.strokeStyle = 'rgba(76,201,240,.45)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  // A dotted trail to every order in the queue, in order.
+  if (pending.length) {
+    ctx.setLineDash([cam.z * 0.1, cam.z * 0.18]);
+    ctx.lineDashOffset = -(performance.now() / 30) % 1000;
+    ctx.strokeStyle = 'rgba(125,223,143,.55)';
+    ctx.lineWidth = Math.max(1.5, cam.z * 0.05);
     ctx.beginPath();
-    ctx.moveTo(sx(colOf(u) + 0.5), sy(rowOf(u) + 0.5));
-    while (u !== -1 && guard++ < 3000) {
-      ctx.lineTo(sx(colOf(u) + 0.5), sy(rowOf(u) + 0.5));
-      u = flow.next[u];
-    }
-    ctx.lineTo(sx(F.hq.x), sy(F.hq.y));
+    ctx.moveTo(sx(c.x), sy(c.y));
+    for (const s of pending) ctx.lineTo(sx(s.x), sy(s.y));
     ctx.stroke();
   }
   ctx.restore();
 }
 
-/** The nearest walkable cell beside the enemy HQ, where waves step out. */
-function exitCell(flow, fallback) {
-  let best = -1, bd = Infinity;
-  for (let y = -2; y <= 2; y++) {
-    for (let x = -2; x <= 2; x++) {
-      if (Math.abs(x) < 2 && Math.abs(y) < 2) continue;
-      const i = at(F.enemy.cx + x, F.enemy.cy + y);
-      if (flow.dist[i] < bd) { bd = flow.dist[i]; best = i; }
+/** Where each side's columns are heading: blue for yours, red for theirs,
+    traced from each finished Factory's door. */
+function drawRoutes() {
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.setLineDash([cam.z * 0.22, cam.z * 0.3]);
+  ctx.lineDashOffset = -(performance.now() / 26) % 1000;
+  ctx.lineWidth = Math.max(2, cam.z * 0.09);
+  for (const f of F.structs) {
+    if (f.type !== 'fab' || !f.done) continue;
+    const flow = F.flow[f.side] && F.flow[f.side].bold;
+    if (!flow || !flow.next) continue;
+    let u = -1, bd = Infinity;
+    for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) {
+      if (Math.max(Math.abs(x), Math.abs(y)) !== 2) continue;
+      const cx = f.cx + x, cy = f.cy + y;
+      if (cx < 0 || cy < 0 || cx >= MAP_W || cy >= MAP_H) continue;
+      const i = at(cx, cy);
+      if (flow.dist[i] < bd) { bd = flow.dist[i]; u = i; }
     }
-  }
-  return best >= 0 ? best : fallback;
-}
-
-function drawBase(b, colour, label) {
-  const z = cam.z, s = HQ_HALF * z;
-  const x = sx(b.x), y = sy(b.y);
-  if (!visible(b.x, b.y)) return;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = b.hit > 0 ? '#2a3a46' : '#141e27';
-  ctx.strokeStyle = colour;
-  ctx.lineWidth = Math.max(2, z * 0.08);
-  roundRect(-s + 2, -s + 2, s * 2 - 4, s * 2 - 4, z * 0.3);
-  ctx.fill();
-  ctx.stroke();
-  // Inner keep and a slow radar sweep.
-  ctx.globalAlpha = 0.5;
-  roundRect(-s * 0.5, -s * 0.5, s, s, z * 0.15);
-  ctx.stroke();
-  ctx.globalAlpha = 0.25;
-  ctx.beginPath();
-  ctx.arc(0, 0, s * 0.8, 0, 6.284);
-  ctx.stroke();
-  const sweep = performance.now() / 900;
-  ctx.globalAlpha = 0.7;
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(Math.cos(sweep) * s * 0.8, Math.sin(sweep) * s * 0.8);
-  ctx.stroke();
-  ctx.globalAlpha = 1;
-  if (label) {
-    ctx.fillStyle = colour;
-    ctx.font = `700 ${Math.max(9, Math.round(z * 0.36))}px system-ui,sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, 0, 0);
+    if (u < 0) continue;
+    ctx.strokeStyle = f.side ? 'rgba(255,95,109,.22)' : 'rgba(76,201,240,.24)';
+    ctx.beginPath();
+    ctx.moveTo(sx(colOf(u) + 0.5), sy(rowOf(u) + 0.5));
+    for (let guard = 0; u !== -1 && guard < 3000; guard++) {
+      ctx.lineTo(sx(colOf(u) + 0.5), sy(rowOf(u) + 0.5));
+      u = flow.next[u];
+    }
+    ctx.stroke();
   }
   ctx.restore();
-  bar(x, y - s - z * 0.25, s * 2, b.hp / b.max, b.hit > 0);
-}
-
-function drawBunker(b) {
-  if (!visible(b.x, b.y)) return;
-  const z = cam.z, x = sx(b.x), y = sy(b.y), r = z * 0.42;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = b.hit > 0 ? '#3a2429' : '#221619';
-  ctx.strokeStyle = '#ff5f6d';
-  ctx.lineWidth = Math.max(1.5, z * 0.06);
-  ctx.beginPath();
-  for (let k = 0; k < 6; k++) {
-    const a = k / 6 * 6.284 + Math.PI / 6;
-    k ? ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r) : ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
-  }
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  ctx.rotate(b.ang);
-  ctx.fillStyle = '#ff5f6d';
-  ctx.fillRect(0, -z * 0.06, z * 0.36, z * 0.12);
-  ctx.beginPath(); ctx.arc(0, 0, z * 0.14, 0, 6.284); ctx.fill();
-  ctx.restore();
-  if (b.hp < b.max) bar(x, y + z * 0.5, z * 0.8, b.hp / b.max, b.hit > 0);
 }
 
 function drawWrecks() {
@@ -408,7 +396,7 @@ function drawWrecks() {
     ctx.lineWidth = 1;
     const z = cam.z;
     ctx.beginPath();
-    ctx.arc(sx(w.x), sy(w.y), z * 0.3, 0, 6.284);
+    ctx.arc(sx(w.x), sy(w.y), z * (w.big ? 1.1 : 0.3), 0, 6.284);
     ctx.fill();
     ctx.stroke();
   }
@@ -417,16 +405,191 @@ function drawWrecks() {
 
 function drawSelection() {
   const t = S.selected;
-  if (!t || F.grid[t.i] !== t) return;
-  ctx.beginPath();
-  ctx.arc(sx(t.x), sy(t.y), rangeOf(t) * cam.z, 0, 6.284);
-  ctx.fillStyle = 'rgba(255,255,255,.045)';
-  ctx.fill();
-  ctx.strokeStyle = TOWERS[t.k].color;
-  ctx.globalAlpha = 0.6;
+  if (!t || t.dead) return;
+  ctx.save();
+  if (t.kind === 'struct' && t.type === 'tower') {
+    ctx.beginPath();
+    ctx.arc(sx(t.x), sy(t.y), rangeOf(t) * cam.z, 0, 6.284);
+    ctx.fillStyle = 'rgba(255,255,255,.045)';
+    ctx.fill();
+    ctx.strokeStyle = t.side ? RED : TOWERS[t.k].color;
+    ctx.globalAlpha = 0.6;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  } else {
+    const r = (t.kind === 'struct' ? t.half + 0.25 : 0.7) * cam.z;
+    ctx.strokeStyle = 'rgba(255,255,255,.7)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([cam.z * 0.18, cam.z * 0.12]);
+    if (t.kind === 'struct') ctx.strokeRect(sx(t.x) - r, sy(t.y) - r, r * 2, r * 2);
+    else { ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), r, 0, 6.284); ctx.stroke(); }
+  }
+  ctx.restore();
+}
+
+/** Scaffolding for anything still going up: a hatched outline that fills. */
+function drawSite(s) {
+  const z = cam.z, r = s.half * z;
+  const x = sx(s.x), y = sy(s.y);
+  ctx.save();
+  ctx.strokeStyle = sideCol(s.side);
+  ctx.globalAlpha = 0.75;
   ctx.lineWidth = 1.2;
+  ctx.setLineDash([z * 0.12, z * 0.1]);
+  ctx.strokeRect(x - r + 2, y - r + 2, r * 2 - 4, r * 2 - 4);
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 0.28;
+  ctx.fillStyle = sideCol(s.side);
+  const hFill = (r * 2 - 4) * s.prog;
+  ctx.fillRect(x - r + 2, y + r - 2 - hFill, r * 2 - 4, hFill);
+  ctx.restore();
+  bar(x, y + r + 1, r * 1.8, s.prog, false, '#7ddf8f');
+}
+
+function drawFactory(f) {
+  if (!visible(f.x, f.y)) return;
+  if (!f.done) { drawSite(f); return; }
+  const z = cam.z, s = 1.5 * z;
+  const x = sx(f.x), y = sy(f.y);
+  const col = sideCol(f.side);
+  ctx.save();
+  ctx.translate(x, y);
+  // Body: a heavy plate with a lit edge.
+  ctx.fillStyle = f.hit > 0 ? '#2d3b47' : f.side ? '#231a1e' : '#17222c';
+  ctx.strokeStyle = col;
+  ctx.lineWidth = Math.max(2, z * 0.07);
+  roundRect(-s + 3, -s + 3, s * 2 - 6, s * 2 - 6, z * 0.22);
+  ctx.fill();
   ctx.stroke();
-  ctx.globalAlpha = 1;
+  // Roof panels.
+  ctx.strokeStyle = 'rgba(255,255,255,.08)';
+  ctx.lineWidth = 1;
+  for (let k = -1; k <= 1; k += 2) {
+    ctx.beginPath();
+    ctx.moveTo(-s + z * 0.35, k * z * 0.5); ctx.lineTo(s - z * 0.35, k * z * 0.5);
+    ctx.stroke();
+  }
+  // The assembly bay: a conveyor that runs while something is being made.
+  const busy = !!(f.job || f.up);
+  ctx.fillStyle = '#0c1116';
+  ctx.fillRect(-z * 0.9, -z * 0.28, z * 1.8, z * 0.56);
+  ctx.strokeStyle = busy ? col : 'rgba(255,255,255,.15)';
+  ctx.lineWidth = Math.max(1, z * 0.04);
+  const shift = (performance.now() / (busy ? 90 : 900)) % 1;
+  for (let k = -3; k <= 3; k++) {
+    const bx = (k + shift) * z * 0.26;
+    if (Math.abs(bx) > z * 0.88) continue;
+    ctx.beginPath(); ctx.moveTo(bx, -z * 0.24); ctx.lineTo(bx, z * 0.24); ctx.stroke();
+  }
+  // The unit taking shape on the belt.
+  if (f.job) {
+    const k = f.job.t / f.job.need;
+    ctx.globalAlpha = 0.35 + 0.65 * k;
+    ctx.fillStyle = f.side ? UNITS[f.job.k].ecol : UNITS[f.job.k].col;
+    ctx.beginPath(); ctx.arc(0, 0, z * 0.12 + z * 0.1 * k, 0, 6.284); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // Two stacks with fans that spin with the work.
+  for (const [ox, oy] of [[-0.95, -0.95], [0.95, -0.95]]) {
+    ctx.save();
+    ctx.translate(ox * z, oy * z);
+    ctx.fillStyle = '#0f161d';
+    ctx.beginPath(); ctx.arc(0, 0, z * 0.28, 0, 6.284); ctx.fill();
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.rotate(f.spin * (ox > 0 ? 1 : -1));
+    ctx.strokeStyle = busy ? col : 'rgba(255,255,255,.3)';
+    ctx.lineWidth = Math.max(1.2, z * 0.05);
+    ctx.beginPath();
+    for (let b = 0; b < 3; b++) {
+      const a = b / 3 * 6.284;
+      ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * z * 0.22, Math.sin(a) * z * 0.22);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  // Tier pips along the bottom edge.
+  ctx.fillStyle = col;
+  const pips = Math.min(f.tier, 8);
+  for (let k = 0; k < pips; k++) {
+    ctx.fillRect(-s + z * 0.35 + k * z * 0.22, s - z * 0.42, z * 0.14, z * 0.14);
+  }
+  if (f.tier > 8) {
+    ctx.font = `700 ${Math.max(8, z * 0.22)}px system-ui,sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText('T' + f.tier, -s + z * 0.35 + 8 * z * 0.22, s - z * 0.26);
+  }
+  if (f.stall && !f.side) {
+    ctx.fillStyle = '#ffd76b';
+    ctx.font = `700 ${Math.max(9, z * 0.26)}px system-ui,sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('needs gold', 0, s - z * 0.62);
+  }
+  ctx.restore();
+  // Production (or upgrade) progress under the Factory.
+  const job = f.up || f.job;
+  if (job) bar(x, y + s + 1, s * 1.8, job.t / job.need, false, f.up ? '#c9a7ff' : col);
+  if (f.hp < f.max) bar(x, y - s - z * 0.2, s * 1.8, f.hp / f.max, f.hit > 0);
+}
+
+function drawHelper(h) {
+  if (!visible(h.x, h.y)) return;
+  if (!h.done) { drawSite(h); return; }
+  const z = cam.z, x = sx(h.x), y = sy(h.y), r = z * 0.36;
+  const col = sideCol(h.side);
+  const busy = h.fab && !h.fab.dead && (h.fab.job || h.fab.up);
+  // A conduit back to the Factory it feeds.
+  if (h.fab && !h.fab.dead) {
+    ctx.strokeStyle = busy ? col : 'rgba(255,255,255,.12)';
+    ctx.globalAlpha = busy ? 0.55 : 1;
+    ctx.lineWidth = Math.max(1, z * 0.06);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.sign(h.fab.x - h.x) * z * 0.55, y + Math.sign(h.fab.y - h.y) * z * 0.55);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = h.hit > 0 ? '#2d3b47' : '#141d25';
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 1.2;
+  roundRect(-r, -r, r * 2, r * 2, z * 0.1);
+  ctx.fill();
+  ctx.stroke();
+  ctx.rotate((performance.now() / (busy ? 250 : 2500)) % 6.284);
+  ctx.strokeStyle = busy ? '#9fd0b0' : 'rgba(159,208,176,.4)';
+  ctx.lineWidth = Math.max(1.2, z * 0.05);
+  ctx.beginPath();
+  for (let k = 0; k < 4; k++) {
+    const a = k / 4 * 6.284;
+    ctx.moveTo(Math.cos(a) * z * 0.08, Math.sin(a) * z * 0.08);
+    ctx.lineTo(Math.cos(a) * z * 0.22, Math.sin(a) * z * 0.22);
+  }
+  ctx.stroke();
+  ctx.restore();
+  if (h.hp < h.max) bar(x, y + r + 1, z * 0.7, h.hp / h.max, h.hit > 0);
+}
+
+function drawTower(t) {
+  if (!visible(t.x, t.y)) return;
+  if (!t.done) {
+    drawSite(t);
+    ctx.globalAlpha = 0.25 + 0.5 * t.prog;
+    drawTurret(ctx, sx(t.x), sy(t.y), cam.z, t, true);
+    ctx.globalAlpha = 1;
+    return;
+  }
+  const z = cam.z;
+  drawAura(t);
+  if (t.side) {
+    // Enemy towers stand on a red plinth so they never read as yours.
+    ctx.fillStyle = 'rgba(255,95,109,.35)';
+    ctx.fillRect(sx(t.x) - z * 0.48, sy(t.y) - z * 0.48, z * 0.96, z * 0.96);
+  }
+  drawTurret(ctx, sx(t.x), sy(t.y), z, t, false);
+  if (t.hp < t.max) bar(sx(t.x), sy(t.y) + z * 0.5, z * 0.8, t.hp / t.max, t.hit > 0);
 }
 
 function drawAura(t) {
@@ -434,7 +597,7 @@ function drawAura(t) {
   const k = 1 - t.ring;
   ctx.beginPath();
   ctx.arc(sx(t.x), sy(t.y), rangeOf(t) * cam.z * (0.25 + k * 0.8), 0, 6.284);
-  ctx.strokeStyle = TOWERS.frost.color;
+  ctx.strokeStyle = t.side ? RED : TOWERS.frost.color;
   ctx.globalAlpha = t.ring * 0.7;
   ctx.lineWidth = cam.z * 0.1 * t.ring + 1;
   ctx.stroke();
@@ -444,41 +607,59 @@ function drawAura(t) {
 function drawPreview() {
   if (!S.picked || S.hover < 0) return;
   const i = S.hover;
+  const key = S.picked;
   const x = colOf(i) + 0.5, y = rowOf(i) + 0.5;
-  const ghost = { i, k: S.picked, l: 0, ang: -0.5, kick: 0, elev: Math.max(0, F.map.height[i]) };
-  const ok = canBuild(i) && S.gold >= buildCost(S.picked);
-  const range = rangeOf(ghost);
-  ctx.beginPath();
-  ctx.arc(sx(x), sy(y), range * cam.z, 0, 6.284);
-  ctx.fillStyle = ok ? 'rgba(255,255,255,.05)' : 'rgba(255,95,109,.07)';
-  ctx.fill();
-  ctx.strokeStyle = ok ? 'rgba(255,255,255,.28)' : 'rgba(255,95,109,.5)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  ctx.globalAlpha = 0.6;
-  drawTurret(ctx, sx(x), sy(y), cam.z, ghost, true);
-  ctx.globalAlpha = 1;
-  if (!ok) {
-    const c = cam.z * 0.28, hx = sx(x), hy = sy(y);
-    ctx.strokeStyle = '#ff5f6d';
-    ctx.lineWidth = 2;
+  const why = whyNot(i);
+  const ok = !why && S.gold >= buildCost(key);
+  const z = cam.z;
+  if (key === 'fab' || key === 'helper') {
+    const r = (key === 'fab' ? 1.5 : 0.5) * z;
+    ctx.fillStyle = ok ? 'rgba(76,201,240,.18)' : 'rgba(255,95,109,.18)';
+    ctx.strokeStyle = ok ? 'rgba(76,201,240,.8)' : 'rgba(255,95,109,.8)';
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(sx(x) - r, sy(y) - r, r * 2, r * 2);
+    ctx.strokeRect(sx(x) - r, sy(y) - r, r * 2, r * 2);
+    if (key === 'fab' && ok) {
+      // Show where its twelve Helpers would go.
+      ctx.fillStyle = 'rgba(159,208,176,.14)';
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== 2 || (Math.abs(dx) === 2 && Math.abs(dy) === 2)) continue;
+        ctx.fillRect(sx(x + dx - 0.5) + 2, sy(y + dy - 0.5) + 2, z - 4, z - 4);
+      }
+    }
+  } else {
+    const ghost = { i, k: key, l: 0, side: 0, ang: -0.5, kick: 0, elev: Math.max(0, F.map.height[i]) };
+    const range = rangeOf(ghost);
     ctx.beginPath();
-    ctx.moveTo(hx - c, hy - c); ctx.lineTo(hx + c, hy + c);
-    ctx.moveTo(hx + c, hy - c); ctx.lineTo(hx - c, hy + c);
+    ctx.arc(sx(x), sy(y), range * z, 0, 6.284);
+    ctx.fillStyle = ok ? 'rgba(255,255,255,.05)' : 'rgba(255,95,109,.07)';
+    ctx.fill();
+    ctx.strokeStyle = ok ? 'rgba(255,255,255,.28)' : 'rgba(255,95,109,.5)';
+    ctx.lineWidth = 1;
     ctx.stroke();
-  } else if (ghost.elev > 0) {
-    ctx.fillStyle = '#7ddf8f';
-    ctx.font = `600 ${Math.max(10, cam.z * 0.3)}px system-ui,sans-serif`;
+    ctx.globalAlpha = 0.6;
+    drawTurret(ctx, sx(x), sy(y), z, ghost, true);
+    ctx.globalAlpha = 1;
+    if (ok && ghost.elev > 0) {
+      ctx.fillStyle = '#7ddf8f';
+      ctx.font = `600 ${Math.max(10, z * 0.3)}px system-ui,sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('high ground', sx(x), sy(y) - z * 0.62);
+    }
+  }
+  if (!ok) {
+    ctx.fillStyle = '#ff5f6d';
+    ctx.font = `600 ${Math.max(10, z * 0.28)}px system-ui,sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText('high ground', sx(x), sy(y) - cam.z * 0.62);
+    ctx.fillText(why || 'Not enough gold', sx(x), sy(y) - z * (key === 'fab' ? 1.8 : 0.7));
   }
 }
 
 function drawBeams() {
-  for (const t of F.towers) {
-    if (TOWERS[t.k].kind !== 'beam' || !t.beam || t.beam.dead) continue;
+  for (const t of F.structs) {
+    if (t.type !== 'tower' || !t.done || TOWERS[t.k].kind !== 'beam' || !t.beam || t.beam.dead) continue;
     const w = cam.z * (0.06 + 0.05 * (t.focus / 2.2));
-    ctx.strokeStyle = TOWERS[t.k].color;
+    ctx.strokeStyle = t.side ? RED : TOWERS[t.k].color;
     ctx.lineCap = 'round';
     ctx.globalAlpha = 0.85;
     ctx.lineWidth = w;
@@ -493,36 +674,125 @@ function drawBeams() {
   }
 }
 
-/** Your units: a team-coloured body, shaped by role, with a gun barrel. */
+/** The Commander: a big walker in its side's colour, with a build beam. */
+function drawCommander(c) {
+  const z = cam.z, x = sx(c.x), y = sy(c.y);
+  const col = sideCol(c.side);
+  // The nanolathe: a shimmering beam to whatever it is building.
+  if (c.beam && !c.beam.dead) {
+    const t = performance.now() / 80;
+    ctx.save();
+    ctx.strokeStyle = c.beam.done ? '#7ddf8f' : col;
+    ctx.globalAlpha = 0.5 + 0.3 * Math.sin(t);
+    ctx.lineWidth = Math.max(1.5, z * 0.07);
+    ctx.setLineDash([z * 0.08, z * 0.08]);
+    ctx.lineDashOffset = -t * 3;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(sx(c.beam.x), sy(c.beam.y));
+    ctx.stroke();
+    ctx.restore();
+    // Sparks where the beam lands, picked from the clock so drawing never
+    // touches the simulation.
+    const b = c.beam, tick = Math.floor(t / 1.5);
+    ctx.fillStyle = col;
+    for (let k = 0; k < 3; k++) {
+      const h1 = hash(tick * 7 + k), h2 = hash(tick * 13 + k * 3 + 1);
+      const px = sx(b.x + (h1 - 0.5) * b.half * 1.6), py = sy(b.y + (h2 - 0.5) * b.half * 1.6);
+      ctx.fillRect(px - z * 0.04, py - z * 0.04, z * 0.08, z * 0.08);
+    }
+  }
+  if (!visible(c.x, c.y)) return;
+  const r = COMMANDER.rad * z;
+  ctx.save();
+  ctx.translate(x, y);
+  // A glow ring so it is easy to find in a crowd.
+  ctx.strokeStyle = col;
+  ctx.globalAlpha = 0.35;
+  ctx.lineWidth = Math.max(2, z * 0.08);
+  ctx.beginPath(); ctx.arc(0, 0, r * 1.35, 0, 6.284); ctx.stroke();
+  ctx.globalAlpha = 1;
+  // Legs, swinging while it walks.
+  ctx.rotate(c.ang);
+  const swing = c.walk ? Math.sin(performance.now() / 90) * 0.35 : 0;
+  ctx.fillStyle = '#0f161d';
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 1.2;
+  for (const s of [-1, 1]) {
+    ctx.save();
+    ctx.translate(0, s * r * 0.62);
+    ctx.fillRect(-r * 0.7 + s * swing * r, -r * 0.2, r * 1.4, r * 0.4);
+    ctx.strokeRect(-r * 0.7 + s * swing * r, -r * 0.2, r * 1.4, r * 0.4);
+    ctx.restore();
+  }
+  ctx.rotate(-c.ang);
+  // Torso, turned towards what it is shooting.
+  ctx.rotate(c.tgt ? c.aim : c.ang);
+  ctx.fillStyle = c.hit > 0 ? '#ffffff' : c.side ? '#3a1f26' : '#16303d';
+  ctx.beginPath();
+  ctx.moveTo(r * 0.9, 0);
+  ctx.lineTo(r * 0.3, -r * 0.8);
+  ctx.lineTo(-r * 0.7, -r * 0.65);
+  ctx.lineTo(-r * 0.7, r * 0.65);
+  ctx.lineTo(r * 0.3, r * 0.8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.lineWidth = Math.max(1.5, z * 0.05);
+  ctx.stroke();
+  ctx.fillStyle = col;
+  ctx.fillRect(r * 0.2 - c.kick * r * 0.2, -r * 0.14, r * 0.95, r * 0.28);
+  ctx.beginPath(); ctx.arc(-r * 0.1, 0, r * 0.26, 0, 6.284); ctx.fill();
+  ctx.restore();
+  bar(x, y - r * 1.75, z * 1.1, c.hp / c.max, c.hit > 0);
+}
+
+/** Units: shaped by role, coloured by side, with a thin team outline. */
 function drawUnit(u) {
   const z = cam.z, x = sx(u.x), y = sy(u.y);
-  const col = u.hit > 0 ? '#ffffff' : u.def.col;
+  const col = u.hit > 0 ? '#ffffff' : u.side ? u.def.ecol : u.def.col;
+  const edge = sideCol(u.side);
+  if (u.def.fly) {
+    ctx.fillStyle = 'rgba(0,0,0,.28)';
+    ctx.beginPath();
+    ctx.ellipse(x + z * 0.18, y + z * 0.26, z * 0.2, z * 0.09, 0, 0, 6.284);
+    ctx.fill();
+  }
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(u.ang);
   ctx.fillStyle = col;
-  ctx.strokeStyle = '#0c1116';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = edge;
+  ctx.lineWidth = Math.max(1, z * 0.035);
+  const grow = 1 + Math.min(0.5, 0.08 * (u.tier - 1));
   const recoil = u.kick * z * 0.05;
   if (u.k === 'breaker') {
-    const s = z * 0.3;
+    const s = z * 0.3 * grow;
     roundRect(-s, -s * 0.8, s * 2, s * 1.6, z * 0.06);
     ctx.fill(); ctx.stroke();
-    ctx.fillRect(-recoil, -z * 0.05, z * 0.45, z * 0.1);
+    ctx.fillRect(-recoil, -z * 0.05, z * 0.45 * grow, z * 0.1);
     ctx.fillStyle = '#0c1116';
     ctx.beginPath(); ctx.arc(0, 0, z * 0.11, 0, 6.284); ctx.fill();
   } else if (u.k === 'striker') {
-    const s = z * 0.24;
+    const s = z * 0.24 * grow;
     ctx.beginPath();
     ctx.moveTo(s * 1.3, 0); ctx.lineTo(-s, -s * 0.8); ctx.lineTo(-s * 0.5, 0); ctx.lineTo(-s, s * 0.8);
     ctx.closePath();
     ctx.fill(); ctx.stroke();
+  } else if (u.k === 'gunship') {
+    const s = z * 0.26 * grow;
+    ctx.beginPath();
+    ctx.moveTo(s * 1.2, 0); ctx.lineTo(-s * 0.4, -s); ctx.lineTo(-s * 0.9, -s * 0.2);
+    ctx.lineTo(-s * 0.9, s * 0.2); ctx.lineTo(-s * 0.4, s);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.35)';
+    ctx.beginPath(); ctx.arc(-s * 0.1, 0, s * 0.9, performance.now() / 60, performance.now() / 60 + 1.2); ctx.stroke();
   } else {
-    ctx.beginPath(); ctx.arc(0, 0, z * 0.17, 0, 6.284); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, z * 0.17 * grow, 0, 6.284); ctx.fill(); ctx.stroke();
     ctx.fillRect(-recoil, -z * 0.035, z * 0.3, z * 0.07);
   }
   ctx.restore();
-  if (u.hp < u.max) bar(x, y - z * 0.42, z * 0.5, u.hp / u.max, false);
+  if (u.hp < u.max) bar(x, y - z * 0.42, z * 0.5, u.hp / u.max, false, u.side ? '#ff8f8f' : '#7ddf8f');
 }
 
 function drawArcs() {
@@ -581,7 +851,7 @@ function drawWarps() {
 
 function drawShots() {
   const z = cam.z;
-  for (const s of S.shots) {
+  for (const s of F.shots) {
     if (!visible(s.x, s.y)) continue;
     ctx.save();
     ctx.translate(sx(s.x), sy(s.y));
@@ -589,25 +859,17 @@ function drawShots() {
     ctx.fillStyle = s.crit ? '#ffe08a' : s.col;
     if (s.k === 'gun') {
       ctx.fillRect(-z * 0.09, -z * 0.035, z * 0.18, z * 0.07);
-    } else {
+    } else if (s.k === 'rocket') {
       ctx.beginPath();
       ctx.moveTo(z * 0.16, 0); ctx.lineTo(-z * 0.1, -z * 0.08); ctx.lineTo(-z * 0.1, z * 0.08);
       ctx.closePath();
       ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.arc(0, 0, z * (s.big ? 0.09 : 0.05), 0, 6.284);
+      ctx.fill();
     }
     ctx.restore();
-  }
-}
-
-/** Hostile fire is always red, so you can tell who is shooting whom. */
-function drawBolts() {
-  const z = cam.z;
-  ctx.fillStyle = '#ff7b86';
-  for (const b of F.bolts) {
-    if (!visible(b.x, b.y)) continue;
-    ctx.beginPath();
-    ctx.arc(sx(b.x), sy(b.y), z * (b.big ? 0.09 : 0.05), 0, 6.284);
-    ctx.fill();
   }
 }
 
@@ -657,12 +919,13 @@ function drawMinimap() {
   const mx = x => b.x + x / MAP_W * b.w, my = y => b.y + y / MAP_H * b.h;
   const dot = (x, y, s, c) => { ctx.fillStyle = c; ctx.fillRect(mx(x) - s / 2, my(y) - s / 2, s, s); };
 
-  dot(F.hq.x, F.hq.y, 7, '#4cc9f0');
-  dot(F.enemy.x, F.enemy.y, 7, '#ff5f6d');
-  for (const k of F.bunkers) if (!k.dead) dot(k.x, k.y, 3, '#ff5f6d');
-  for (const t of F.towers) dot(t.x, t.y, 2.5, TOWERS[t.k].color);
-  for (const u of F.units) dot(u.x, u.y, 2.5, '#a8ecbb');
-  for (const e of S.foes) dot(e.x, e.y, 2.5, '#ff9aa3');
+  for (const s of F.structs) dot(s.x, s.y, s.type === 'fab' ? 6 : 3, s.side ? '#ff5f6d' : s.done ? '#4cc9f0' : 'rgba(76,201,240,.5)');
+  for (const u of F.units) dot(u.x, u.y, 2, u.side ? '#ff9aa3' : '#a8ecbb');
+  for (const c of F.cmd) {
+    if (!c || c.dead) continue;
+    dot(c.x, c.y, 7, '#0a0f13');
+    dot(c.x, c.y, 5, c.side ? '#ff5f6d' : '#ffffff');
+  }
 
   // The part of the map on screen.
   ctx.globalAlpha = 1;
@@ -680,13 +943,6 @@ function drawMinimap() {
 function drawBanners() {
   ctx.textAlign = 'center';
   const base = Math.max(22, Math.min(40, W / 26));
-  if (S.waveFlash > 0) {
-    ctx.globalAlpha = Math.min(1, S.waveFlash);
-    ctx.fillStyle = '#d7e3ec';
-    ctx.font = '600 ' + Math.round(base) + 'px system-ui,sans-serif';
-    ctx.fillText('Wave ' + S.wave, W / 2, base * 1.6);
-    ctx.globalAlpha = 1;
-  }
   if (S.warn > 0) {
     ctx.globalAlpha = Math.min(1, S.warn * 2);
     ctx.fillStyle = '#ff5f6d';

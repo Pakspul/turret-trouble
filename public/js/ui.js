@@ -3,14 +3,15 @@
    side console, the overlays, and the Foundry.                          */
 
 import {
-  TOWERS, TOWER_ORDER, FOUNDRY, NODES, FOES, UNITS, UNIT_ORDER,
-  FRONTIER_UNLOCK_WAVE, HIGH_GROUND_RANGE, sectorDepth, sectorBounty, bunkerCount
+  TOWERS, TOWER_ORDER, FOUNDRY, NODES, FOES,
+  FRONTIER_UNLOCK_WAVE, HIGH_GROUND_RANGE, sectorBounty, aiIncome, aiStartTier
 } from './config.js';
 import { field } from './field.js';
 import * as holdout from './game.js';
 import { S, statsOf, dpsOf, speedLadder } from './game.js';
 import * as frontier from './frontier.js';
 import { F } from './frontier.js';
+import * as fui from './frontier-ui.js';
 import { sectorSeed, seedTag } from './terrain.js';
 import { summarise } from './waves.js';
 import * as meta from './meta.js';
@@ -58,7 +59,7 @@ export const actions = {
   replay: () => {},
   /** Open a Frontier sortie on sector `s`. */
   frontier: () => {},
-  /** Put the Frontier camera back over the HQ. */
+  /** Put the Frontier camera back over your Commander. */
   home: () => {}
 };
 
@@ -129,6 +130,12 @@ function syncSelection() {
   const box = el('sel');
   const t = S.selected;
   const R = rules();
+  // Frontier: Factories, Helpers, sites, Commanders and enemy buildings.
+  if (S.mode === 'frontier' && fui.syncSelection(box)) {
+    selSig = '';
+    if (selShown !== t) { selShown = t; scrollTo(box); }
+    return;
+  }
   if (!R.alive(t)) { box.classList.add('hidden'); selSig = ''; selShown = null; return; }
 
   const cost = R.upgradeCost(t);
@@ -195,8 +202,12 @@ function syncSelection() {
   // console, so bring it into view whenever a different turret is picked.
   if (selShown !== t) {
     selShown = t;
-    try { box.scrollIntoView({ block: 'nearest' }); } catch (e) { box.scrollIntoView(false); }
+    scrollTo(box);
   }
+}
+
+function scrollTo(box) {
+  try { box.scrollIntoView({ block: 'nearest' }); } catch (e) { box.scrollIntoView(false); }
 }
 
 /**
@@ -283,6 +294,14 @@ export function syncSpeed() {
 
 function syncWaveButton() {
   const btn = el('btnWave');
+  if (S.mode === 'frontier') {
+    // No waves out here: the big button puts the camera on your Commander.
+    const c = F.cmd[0];
+    btn.disabled = !c || c.dead || S.phase === 'dead';
+    btn.textContent = !c || c.dead ? 'Commander lost' : F.follow ? 'Following' : 'Follow Commander';
+    btn.classList.toggle('go', !F.follow && !btn.disabled);
+    return;
+  }
   if (S.phase === 'run') {
     btn.textContent = 'Wave ' + S.wave + ' incoming';
     btn.disabled = true;
@@ -299,7 +318,9 @@ function syncWaveButton() {
 }
 
 export function sync() {
-  el('waveNo').textContent = Math.max(1, S.wave);
+  const fr = S.mode === 'frontier';
+  el('waveK').textContent = fr ? 'time' : 'wave';
+  el('waveNo').textContent = fr ? fui.clock(F.time) : Math.max(1, S.wave);
   el('gold').textContent = S.gold;
   el('score').textContent = S.score.toLocaleString();
   el('cores').textContent = meta.profile.cores.toLocaleString();
@@ -307,7 +328,7 @@ export function sync() {
   syncLives();
   syncMode();
   syncShop();
-  syncSquad();
+  fui.syncArmy();
   syncSelection();
   syncRecon();
   syncReplay();
@@ -318,14 +339,14 @@ export function sync() {
   if (!el('tapes').classList.contains('hidden')) syncTapes();
 }
 
-/** Holdout counts breaches in hearts; Frontier shows the HQ's integrity. */
+/** Holdout counts breaches in hearts; Frontier shows your Commander. */
 let livesSig = '';
 function syncLives() {
   const sig = `${S.mode}|${S.lives}|${S.maxLives}`;
   if (sig === livesSig) return;
   livesSig = sig;
   if (S.mode === 'frontier') {
-    el('livesK').textContent = 'HQ integrity';
+    el('livesK').textContent = 'Commander';
     const frac = Math.max(0, S.lives / Math.max(1, S.maxLives));
     el('lives').innerHTML = `<span class="hqbar"><i style="width:${(frac * 100).toFixed(1)}%"></i></span><b>${Math.max(0, S.lives)}</b>`;
     el('lives').classList.toggle('hurt', frac < 0.35);
@@ -344,72 +365,9 @@ function syncMode() {
   el('btnTapes').classList.toggle('hidden', fr);
   el('btnClear').classList.toggle('hidden', fr);
   el('btnHome').classList.toggle('hidden', !fr);
-  el('squad').classList.toggle('hidden', !fr);
-}
-
-/* ── the Frontier barracks ────────────────────────────────────────────────
-   Units are bought into a squad that waits at the HQ; the squad marches
-   when the next wave is sent, or at once with Deploy. Buttons are built
-   once and relabelled, so a press is never swallowed by a rebuild.      */
-function buildSquad() {
-  const shop = el('unitShop');
-  shop.textContent = '';
-  for (const key of UNIT_ORDER) {
-    const def = UNITS[key];
-    const btn = document.createElement('button');
-    btn.className = 'tw unit';
-    btn.dataset.k = key;
-    btn.style.setProperty('--c', def.col);
-    btn.title = `${def.name} · ${def.blurb}`;
-    btn.innerHTML = `<span class="ic" style="color:${def.col}">${UNIT_GLYPHS[key]}</span>` +
-      `<span class="nm">${def.name}</span><span class="q"></span><span class="pr"></span>`;
-    btn.addEventListener('click', () => { frontier.recruit(key); sync(); });
-    shop.appendChild(btn);
-  }
-  el('bArmory').onclick = () => { frontier.upgradeArmory(); sync(); };
-  el('bDeploy').onclick = () => { frontier.deploy(); sync(); };
-  el('bDisband').onclick = () => { frontier.disband(); sync(); };
-}
-
-const UNIT_GLYPHS = {
-  trooper: '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="12" r="4"/><path d="M13 12h8"/></svg>',
-  striker: '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12L5 5l4 7-4 7z"/></svg>',
-  breaker: '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 12h7"/></svg>'
-};
-
-let squadSig = '';
-function syncSquad() {
-  if (S.mode !== 'frontier' || !F.map) { squadSig = ''; return; }
-  const size = frontier.squadSize();
-  const prices = UNIT_ORDER.map(k => frontier.unitPrice(k));
-  const alive = F.units.length;
-  const living = F.bunkers.filter(b => !b.dead).length;
-  const sig = [S.gold, size, prices, alive, F.armory, Math.ceil(F.enemy.hp), living, S.phase, meta.revision.n].join('|');
-  if (sig === squadSig) return;
-  squadSig = sig;
-
-  UNIT_ORDER.forEach((key, n) => {
-    const btn = el('unitShop').children[n];
-    btn.classList.toggle('poor', S.gold < prices[n]);
-    btn.querySelector('.q').textContent = F.squad[key] ? '×' + F.squad[key] : '';
-    btn.querySelector('.pr').textContent = prices[n];
-  });
-  el('sqCount').textContent = `${alive} out · ${size} ready`;
-
-  const armory = frontier.armoryPrice();
-  el('bArmory').textContent = `Armory lvl ${F.armory + 1} · ${armory}`;
-  el('bArmory').title = 'Every unit you field from now on is issued with tougher kit';
-  el('bArmory').disabled = S.gold < armory;
-  el('bDeploy').disabled = !size || S.phase === 'dead';
-  el('bDisband').disabled = !size;
-
-  el('sqLine').textContent = size
-    ? 'The squad marches when the next wave is sent.'
-    : alive ? 'Your units are in the field.' : 'Buy units to raise a counter-wave.';
-  const pct = Math.max(0, Math.round(100 * F.enemy.hp / F.enemy.max));
-  el('sqEnemy').innerHTML =
-    `<span>Enemy HQ</span><span class="hqbar foe"><i style="width:${pct}%"></i></span><b>${pct}%</b>` +
-    `<span class="bk">${living}/${F.bunkers.length} bunkers</span>`;
+  el('army').classList.toggle('hidden', !fr);
+  const stick = fr && F.map && F.cmd[0] && !F.cmd[0].dead && S.phase !== 'dead' && S.phase !== 'menu';
+  el('stick').classList.toggle('hidden', !stick);
 }
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
@@ -421,7 +379,7 @@ export function showStart() {
   const parked = S.suspended;
   el('btnResume').classList.toggle('hidden', !parked);
   el('btnResume').textContent = S.mode === 'frontier'
-    ? `Resume sector ${F.sector} · wave ${Math.max(1, S.wave)}`
+    ? `Resume sector ${F.sector} · ${fui.clock(F.time)}`
     : `Resume wave ${Math.max(1, S.wave)}`;
   syncFrontierButton();
   el('btnPlay').classList.toggle('go', !parked);
@@ -473,7 +431,7 @@ function syncFrontierButton() {
   btn.classList.toggle('locked', !open);
   btn.textContent = open ? 'Frontier' : `Frontier · hold wave ${FRONTIER_UNLOCK_WAVE}`;
   btn.title = open
-    ? 'Open maps, enemies that shoot back, and a base to raze'
+    ? 'Command a base and an army on open maps, against an enemy that does the same'
     : `Unlocks once you have held wave ${FRONTIER_UNLOCK_WAVE} in Holdout (best so far: ${meta.profile.stats.bestWave})`;
 }
 
@@ -486,6 +444,7 @@ export function showGameOver() {
   el('btnOverNext').classList.add('hidden');
   el('btnAgain').classList.add('go');
   el('overWave').textContent = S.wavesCleared;
+  el('overUnit').textContent = 'waves held';
   el('overBestK').textContent = 'best';
   el('overBest').textContent = meta.profile.stats.bestWave;
   el('overCores').textContent = meta.profile.cores.toLocaleString();
@@ -512,13 +471,14 @@ export function showGameOver() {
 /** The summary screen, Frontier edition: razed or overrun. */
 function showSortieOver() {
   const won = F.result === 'won';
-  el('overWave').textContent = S.wavesCleared;
-  el('overBestK').textContent = 'sectors razed';
+  el('overWave').textContent = fui.clock(F.time);
+  el('overUnit').textContent = 'in the field';
+  el('overBestK').textContent = 'sectors won';
   el('overBest').textContent = meta.profile.frontier.cleared;
   el('overCores').textContent = meta.profile.cores.toLocaleString();
   el('overLead').textContent = won
-    ? `Sector ${F.sector} razed. The bounty of ${F.bounty.toLocaleString()} Cores is already banked.`
-    : `Sector ${F.sector}: the HQ fell. Your points are already banked.`;
+    ? `Sector ${F.sector}: the enemy is annihilated. The bounty of ${F.bounty.toLocaleString()} Cores is already banked.`
+    : `Sector ${F.sector}: your forces were annihilated. Your points are already banked.`;
   el('btnOverReplay').classList.add('hidden');
   el('btnAgainHead').classList.add('hidden');
   el('btnOverNext').classList.toggle('hidden', !won);
@@ -551,6 +511,7 @@ function towerCounts() {
 }
 
 export function runReport() {
+  if (S.mode === 'frontier') return fui.report();
   const T = S.tally;
   if (!T) return '';
   const built = towerCounts();
@@ -562,13 +523,6 @@ export function runReport() {
     `<div><b>${big(S.score)}</b><span>points scored</span></div>`,
     `<div><b>${big(S.minted)} ◈</b><span>cores minted</span></div>`,
     `<div><b>${leaked}</b><span>leaked</span></div>`,
-    // Frontier: how the counter-waves and the towers fared.
-    ...(S.mode === 'frontier' ? [
-      `<div><b>${big(T.unitsSent)}</b><span>units sent · ${big(T.unitsLost)} lost</span></div>`,
-      `<div><b>${big(T.unitKills)}</b><span>unit kills</span></div>`,
-      `<div><b>${big(T.towersLost)}</b><span>towers lost</span></div>`,
-      `<div><b>${big(T.baseDmg)}</b><span>damage to the base</span></div>`
-    ] : [])
   ].join('');
 
   // Towers: everything built now, plus anything that dealt damage before it
@@ -648,9 +602,9 @@ function syncSectors() {
     card.innerHTML =
       `<div class="bh">
          <span class="bn">Sector ${s}</span>
-         <span class="bw">${s <= cleared ? 'razed' : 'open'}</span>
+         <span class="bw">${s <= cleared ? 'won' : 'open'}</span>
        </div>
-       <div class="bm">map ${seedTag(sectorSeed(s))} · threat from wave ${sectorDepth(s) + 1} · ${bunkerCount(s)} bunkers · bounty ${sectorBounty(s).toLocaleString()} ◈</div>
+       <div class="bm">map ${seedTag(sectorSeed(s))} · enemy income ×${aiIncome(s).toFixed(2)} · its factories start at tier ${aiStartTier(s)} · bounty ${sectorBounty(s).toLocaleString()} ◈</div>
        <div class="brow"><button class="btn tiny go" data-s="${s}">${s === last ? 'Fly this sector' : 'Fly again'}</button></div>`;
     list.appendChild(card);
   }
@@ -1001,7 +955,9 @@ function autoFullscreen() {
 /* ── wiring ───────────────────────────────────────────────────────────── */
 export function bind() {
   buildShop();
-  buildSquad();
+  fui.buildBase();
+  fui.bindSelection(el('sel'));
+  fui.bindStick(el('stick'));
   buildFoundry();
   buildTapes();
   buildSectors();
@@ -1124,7 +1080,6 @@ export function bind() {
     else if (ev.key === 'p' || ev.key === 'P') { actions.togglePause(); el('btnPause').textContent = S.paused ? 'Resume' : 'Pause'; }
     else if (ev.key === 'f' || ev.key === 'F') { openFoundry(); }
     else if ((ev.key === 'b' || ev.key === 'B') && S.mode !== 'frontier') { openTapes(); }
-    else if (S.mode === 'frontier' && (ev.key === 'g' || ev.key === 'G')) { frontier.deploy(); sync(); }
     else if (S.mode === 'frontier' && (ev.key === 'h' || ev.key === 'H')) { actions.home(); }
   });
 }

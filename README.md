@@ -5,10 +5,11 @@ dependencies, no framework. It has two modes:
 
 - **Holdout** — the grid. Enemies walk from the left gate to the right gate;
   you build turrets to stop them, wave after wave.
-- **Frontier** — opens once you have held wave 100 in Holdout. Seeded maps
-  with hills, cliffs and ramps; enemies that choose their own road and shoot
-  back; and an enemy base on the far side that you raze with counter-waves
-  of your own units. See [Frontier](#frontier) below.
+- **Frontier** — opens once you have held wave 100 in Holdout. A small
+  real-time war on seeded maps with hills, cliffs and ramps: you walk a
+  Commander with a thumb stick, build Factories that stream units along
+  build sequences, and fight an enemy that plays by the same rules until one
+  side is annihilated. See [Frontier](#frontier) below.
 
 The twist is the **Foundry**: holding a wave scores points on top of the gold
 it pays, and those points survive the run. Between runs you spend them on
@@ -37,7 +38,8 @@ tower types.
   not dim and sleep mid-wave. The menu, the summary and a paused run release
   it. (Browsers only grant it over HTTPS or on localhost.)
 
-Keyboard (Frontier adds `G` deploy, `H` home and arrow/WASD scrolling): `1`–`7` pick a tower, `space` sends a wave, `P` pauses, `F` opens the
+Keyboard (Frontier adds WASD to walk the Commander, arrows to scroll and `H`
+to centre on the Commander): `1`–`7` pick a tower, `space` sends a wave, `P` pauses, `F` opens the
 Foundry, `B` opens Blueprints, `Esc` clears the selection or closes whichever
 sheet is open, `Shift+D` toggles developer mode.
 
@@ -130,7 +132,8 @@ the rising price is the only brake, and the wall it builds is a slope.
 
 - **Field Command** — Frontier only, and only once wave 100 is held: Drill
   Sergeants (unit damage), Composite Plating (unit health), Hardened
-  Emplacements (tower health) and Forward Depots (build reach).
+  Emplacements (tower health), Forward Depots (Commander build reach),
+  Nanolathe (Commander build speed) and Commander Armour.
 
 Progress lives in `localStorage` under `turret-trouble:profile:v1`. "Reset
 progress" in the Foundry footer wipes it.
@@ -172,62 +175,79 @@ from the Foundry profile — resetting progress leaves your builds alone, and
 
 Holdout teaches you the towers. Frontier is where they go to war. It opens
 when your best Holdout wave reaches 100 (developer mode opens it straight
-away, for testing). Same towers, same prices, same Foundry, and every point
-scored lands in the same Cores bank - so a sortie is also a way to fund the
-next Holdout run.
+away, for testing). Same towers, same Foundry, and every point scored lands
+in the same Cores bank.
 
-**The map.** A sector is a 52 × 32 map generated from a seed: water, low
+It is not tower defence any more so much as a small real-time strategy game
+in the spirit of Supreme Commander: each side has a **Commander** that walks
+the map and builds, **Factories** that turn gold into a steady stream of
+units, and towers for point defence. The enemy plays by exactly the same
+rules. **Annihilation is the only win**: a side is beaten when its Commander
+and every one of its buildings are gone.
+
+**The map.** A sector is a 64 × 40 map generated from a seed: water, low
 ground, hills and plateaus. Cliffs separate heights and only ramps (the
 hatched cells) cross them, so the terrain decides the roads. The same sector
 is the same map every time; the next sector is a new seed. Drag to scroll,
-pinch or wheel to zoom, tap the minimap to jump, `H` or *Centre on HQ* to come
-home. Arrow keys and WASD scroll too.
+pinch or wheel to zoom, tap the minimap (top right) to jump. Arrow keys
+scroll too.
 
-**Building.** Towers go on any land within build reach (5 cells) of your HQ
-or of a tower you already own, so a line can creep outwards. Towers on high
-ground get +12% range per height. Nothing can be built near the enemy base.
+**Your Commander.** The thumb stick in the bottom-left corner walks it (WASD
+on a keyboard); how far you push is how fast it goes, and the camera follows
+it until you drag the map yourself (*Follow Commander*, `H` or `space` put
+the camera back). Pick a building and tap the map to **order** it - the gold
+is paid at once, and the Commander builds every order within its reach (the
+dashed circle), oldest first, with a dotted trail to the rest. With nothing
+to build it repairs whatever of yours is damaged in reach. It also fights,
+and when it falls it goes up in a blast that hurts everything around it.
+Tap your Commander to see its panel; tap an order to cancel it for a full
+refund.
 
-**Smarter enemies.** Waves leave the enemy HQ and plan their own route every
-time the board changes:
+**Factories** are 3×3 and solid. Tap one to set it up:
 
-- *cautious* walkers go around your towers' fields of fire when another road
-  exists - build a kill zone and watch them take the long way;
-- *bold* ones (Runners, Bulwarks, Titans, and a share of everyone else) take
-  the short road through it;
-- nothing is ever sealed in: a tower standing on the only road is simply in
-  the way, and whoever reaches it stops and knocks it down.
-
-Most enemies are armed and shoot back - Grunts and Spectres on the move,
-Tanks and Titans stop to shell a tower in reach. Towers have health, are
-patched back to full after every wave they survive, and are lost for good
-(no refund) when destroyed. A walker that reaches your HQ knocks integrity off
-it; Reinforced Core adds integrity and Field Repair patches it.
-
-**Counter-waves.** The Barracks in the side panel buys units into a squad that
-waits at your HQ. The squad marches on the enemy base when you send the next
-wave (or at once, with *Deploy now*, `G`); *Disband* refunds a squad that has
-not left yet. Three kinds:
+- **Build sequence** - up to eight units, repeated forever: *Trooper,
+  Trooper, Breaker* turns out exactly that, in that order. Heavier units cost
+  more and take longer to build. A Factory waits (and says so) when it
+  cannot afford the next unit.
+- **March** - *Stream* sends each unit off as it is built; *3*, *6* or *10*
+  holds them at the door and sends them together, which is how you break a
+  tower line instead of feeding it one unit at a time.
+- **Upgrade** - each tier makes units ×1.7 as strong for ×1.5 the price and a
+  little more build time. The Factory stops producing while it upgrades.
+- **Helpers** - small buildings on the twelve cells along a Factory's sides
+  (corners left out). Each finished Helper adds +35% to that Factory's build
+  speed, upgrades included. Units walk straight through them.
 
 | unit | role |
 |---|---|
-| **Trooper** | escort — fights anything hostile in reach |
-| **Striker** | raider — fast, ignores enemy troops, runs for the buildings |
-| **Breaker** | siege tank — slow, heavy splash, ×2.5 against structures |
+| **Trooper** | rifles - fights anything, hits air |
+| **Striker** | fast raider - ignores troops, runs for buildings, skirts your towers' fields of fire |
+| **Breaker** | siege tank - slow, splash, ×2.5 against buildings |
+| **Gunship** | flyer - crosses water and cliffs, hits air |
 
-A unit is issued at the current threat, so late recruits are stronger and
-dearer; the in-run **Armory** multiplies the kit of every unit fielded after
-it. At most 16 units can be out or queued at once.
+**Money.** No mining: both sides are paid a steady income that rises with
+the clock, plus a salvage share of everything they destroy. There is never
+enough for everything, so every Factory, Helper, tier and tower is a choice.
 
-**The enemy base** is static for now: an HQ and a ring of bunkers on the
-approach roads, sized by sector. It never rebuilds, and your units grow with
-every wave while it does not - sector 1 ripens around wave 10, each sector
-after holds two waves longer. Raze the HQ to win the sector, bank its bounty,
-and open the next one. Sector *s* plays at Holdout depth 10 × *s*: its wave 1
-has the health, gold and points of Holdout wave 10*s* + 1, and opens with a
-war chest of the six waves before it.
+**Movement that reads like an army.** Units march along flow fields towards
+the other side's buildings. The fields are rebuilt only when a building
+appears or falls - never because a Commander took a step - and a unit keeps
+the target it picked until that target dies or slips out of reach, so
+columns hold their road instead of twitching between routes. Units peel off
+to fight what comes near, then fall back into the column; a gentle push
+keeps a crowd from collapsing into one dot. With no buildings left to aim
+at, units go for the enemy Commander, and only re-plan once it has moved a
+few cells.
+
+**The enemy** follows a build plan - a Factory first, Helpers, towers on the
+side facing you, a second Factory - and saves up to tier its Factories on a
+schedule. Early on it streams its units; later it gathers bigger groups
+before it moves. Deeper sectors pay it more, arm it better and, far enough
+in, let its Factories start a tier up. Tap any enemy building to see what it
+is (an enemy Factory shows its build sequence).
 
 The knobs live in the Frontier block of `config.js`, and a scripted sortie
-prints its curve with:
+across sectors prints its curve with:
 
 ```bash
 npm run probe:frontier
@@ -280,8 +300,9 @@ public/
     recorder.js           build-order tapes, the blueprint library, replay
     field.js              grid occupancy and the BFS flow field
     terrain.js            Frontier: seeded map generation and the route planner
-    frontier.js           Frontier: the simulation (towers, units, bases)
+    frontier.js           Frontier: the simulation (Commanders, Factories, units, AI)
     frontier-render.js    Frontier: camera, terrain painting, minimap
+    frontier-ui.js        Frontier: base buttons, Factory panel, war report, thumb stick
     waves.js              wave composition
     audio.js              synthesised sound cues
     game.js               the simulation; owns all run state
@@ -293,7 +314,7 @@ test/
   smoke.mjs               headless run of the simulation, no DOM required
   recorder.mjs            headless test of recording, replay and its limits
   balance.mjs             plays a full run and prints the economy curve
-  frontier.mjs            terrain, routing, fire-back, units and victory; --probe
+  frontier.mjs            terrain, building, Factories, routes, AI, annihilation; --probe
 docs/
   ROADMAP.md              agreed-in-spirit design notes not built yet
 archive/
@@ -301,11 +322,12 @@ archive/
 ```
 
 The dependency direction is one-way: `config` → `field`/`terrain`/`meta`/
-`recorder` → `game` → `frontier` → `render`/`frontier-render`/`ui` → `main`.
+`recorder` → `game` → `frontier` → `render`/`frontier-render`/`frontier-ui` →
+`ui` → `main`.
 Both simulations share the run state `S` (gold, score, the wave clock, speed,
 projectiles), which is how the side panel, the Foundry and the menus serve
-both modes; `S.mode` says which one is driving. Frontier keeps its own board,
-units and bases on `F`, and reuses Holdout's tower maths and turret drawings
+both modes; `S.mode` says which one is driving. Frontier keeps its own map,
+buildings, units and both Commanders on `F`, and reuses Holdout's tower maths and turret drawings
 so a Gun is the same Gun in both. `recorder.js` never imports the simulation:
 `game.js` hands itself over with `bindGame()`, the same trick `bindProjection()`
 uses for the renderer. `game.js` never touches the DOM; it exposes a single

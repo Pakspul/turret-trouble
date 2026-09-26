@@ -67,7 +67,11 @@ ui.actions.frontier = sector => {
   ui.sync();
 };
 
-ui.actions.home = () => { if (S.mode === 'frontier' && F.map) frender.home(); };
+ui.actions.home = () => {
+  if (S.mode !== 'frontier' || !F.map) return;
+  F.follow = true;
+  frender.home();
+};
 
 ui.actions.startWave = () => (S.mode === 'frontier' ? frontier.startWave() : startWave());
 ui.actions.clearGrid = () => clearGrid();
@@ -249,10 +253,13 @@ canvas.addEventListener('pointercancel', ev => {
 canvas.addEventListener('pointerleave', () => { if (!dragging && !gesture) S.hover = -1; });
 
 /* ── Frontier: a map you can drag, pinch and wheel ────────────────────────
-   One finger (or the left button) drags the map; a tap selects a tower.
-   With a tower picked, the finger places it instead - a second finger, or
-   the right mouse button, still moves the map. Tapping the minimap jumps
-   there.                                                                */
+   One finger (or the left button) drags the map; a tap selects whatever
+   is under it. With a building picked, the finger places it instead - a
+   second finger, or the right mouse button, still moves the map. Tapping
+   the minimap jumps there. Dragging the map or jumping stops the camera
+   following your Commander; the stick, H or the big button start it
+   again. The thumb stick is its own element with its own pointer, so it
+   never lands here.                                                     */
 const pointers = new Map();
 let gesture = null;
 /** Pixels a press may wander before it counts as a drag, not a tap. */
@@ -275,7 +282,7 @@ function mapDown(ev) {
     return;
   }
   const mini = frender.miniHit(ev);
-  if (mini) { frender.focus(mini.x, mini.y); gesture = { mode: 'mini' }; return; }
+  if (mini) { F.follow = false; frender.focus(mini.x, mini.y); gesture = { mode: 'mini' }; return; }
 
   const panButton = ev.pointerType === 'mouse' && ev.button !== 0;
   const mode = S.picked && !panButton && S.phase !== 'dead' ? 'place' : 'pan';
@@ -303,7 +310,7 @@ function mapMove(ev) {
     const mini = frender.miniHit(ev);
     if (mini) frender.focus(mini.x, mini.y);
   } else if (gesture.mode === 'pan') {
-    if (!gesture.moved && Math.hypot(p.x - gesture.x0, p.y - gesture.y0) > TAP_SLOP) gesture.moved = true;
+    if (!gesture.moved && Math.hypot(p.x - gesture.x0, p.y - gesture.y0) > TAP_SLOP) { gesture.moved = true; F.follow = false; }
     if (gesture.moved) frender.pan(p.x - gesture.last.x, p.y - gesture.last.y);
     gesture.last = p;
   } else if (gesture.mode === 'place') {
@@ -323,8 +330,8 @@ function mapUp(ev) {
   }
   gesture = null;
   if (g.mode === 'pan' && !g.moved && S.phase !== 'dead') {
-    const i = frender.cellAt(ev);
-    S.selected = i >= 0 ? F.grid[i] || null : null;
+    const w = frender.worldAt(ev);
+    S.selected = frontier.pickAt(w.x, w.y);
     ui.sync();
   } else if (g.mode === 'place') {
     const i = frender.cellAt(ev);
@@ -345,26 +352,39 @@ canvas.addEventListener('wheel', ev => {
 
 canvas.addEventListener('contextmenu', ev => { if (S.mode === 'frontier') ev.preventDefault(); });
 
-/* Arrow keys and WASD scroll the Frontier map. */
+/* In Frontier WASD walks your Commander (the keyboard's thumb stick) and
+   the arrow keys scroll the map. */
 const held = new Set();
-const PAN_KEYS = {
-  ArrowLeft: [-1, 0], a: [-1, 0], A: [-1, 0], ArrowRight: [1, 0], d: [1, 0],
-  ArrowUp: [0, -1], w: [0, -1], W: [0, -1], ArrowDown: [0, 1], s: [0, 1], S: [0, 1]
-};
+const PAN_KEYS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+const WALK_KEYS = { a: [-1, 0], d: [1, 0], w: [0, -1], s: [0, 1] };
 addEventListener('keydown', ev => {
-  if (S.mode !== 'frontier' || ev.shiftKey || !PAN_KEYS[ev.key]) return;
-  if (ev.key.startsWith('Arrow')) ev.preventDefault();
-  held.add(ev.key);
+  if (S.mode !== 'frontier' || ev.shiftKey || ev.ctrlKey || ev.metaKey) return;
+  const key = ev.key.length === 1 ? ev.key.toLowerCase() : ev.key;
+  if (!PAN_KEYS[key] && !WALK_KEYS[key]) return;
+  if (PAN_KEYS[key]) ev.preventDefault();
+  held.add(key);
 });
-addEventListener('keyup', ev => held.delete(ev.key));
+addEventListener('keyup', ev => held.delete(ev.key.length === 1 ? ev.key.toLowerCase() : ev.key));
 addEventListener('blur', () => held.clear());
 
-function keyPan(dt) {
-  if (!held.size || S.mode !== 'frontier' || S.suspended) return;
-  let dx = 0, dy = 0;
-  for (const k of held) { dx += PAN_KEYS[k][0]; dy += PAN_KEYS[k][1]; }
-  const speed = 900 * dt;
-  frender.pan(-dx * speed, -dy * speed);
+function keyInput(dt) {
+  if (S.mode !== 'frontier') return;
+  let px = 0, py = 0, wx = 0, wy = 0;
+  if (!S.suspended) {
+    for (const k of held) {
+      if (PAN_KEYS[k]) { px += PAN_KEYS[k][0]; py += PAN_KEYS[k][1]; }
+      if (WALK_KEYS[k]) { wx += WALK_KEYS[k][0]; wy += WALK_KEYS[k][1]; }
+    }
+  }
+  const m = Math.hypot(wx, wy) || 1;
+  F.keys.x = wx / m;
+  F.keys.y = wy / m;
+  if (wx || wy) F.follow = true;
+  if (px || py) {
+    F.follow = false;
+    const speed = 900 * dt;
+    frender.pan(-px * speed, -py * speed);
+  }
 }
 
 /* ── frame loop ───────────────────────────────────────────────────────── */
@@ -378,8 +398,9 @@ function frame(now) {
 
   const steps = S.paused ? 0 : S.speed;
   const step = S.mode === 'frontier' ? frontier.update : update;
+  keyInput(dt);
   for (let k = 0; k < steps; k++) step(dt);
-  keyPan(dt);
+  if (S.mode === 'frontier') frender.follow(dt);
 
   if (S.phase === 'dead' && !wasDead) { wasDead = true; ui.showGameOver(); }
   if (S.phase !== 'dead') wasDead = false;

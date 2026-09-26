@@ -20,11 +20,15 @@
 <body>
 
 <div id="app">
-  <div id="stage"><canvas id="cv"></canvas></div>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <!-- Frontier: the thumb stick that walks your Commander. -->
+    <div id="stick" class="stick hidden" aria-label="Move the Commander"><i></i></div>
+  </div>
 
   <aside id="panel">
     <div class="readouts">
-      <div class="readout"><span class="k">wave</span><span class="v" id="waveNo">1</span></div>
+      <div class="readout"><span class="k" id="waveK">wave</span><span class="v" id="waveNo">1</span></div>
       <div class="readout"><span class="k">gold</span><span class="v" id="gold">0</span></div>
       <div class="readout"><span class="k">score</span><span class="v" id="score">0</span></div>
       <div class="readout"><span class="k" id="livesK">breaches left</span><span id="lives">♥♥♥</span></div>
@@ -35,20 +39,15 @@
     <!-- Everything between the readouts and the wave dock scrolls, so short
          (phone landscape) screens can still reach every control. -->
     <div class="pscroll" id="pscroll">
-    <div class="shop" id="shop"></div>
-
-    <!-- Frontier only: buy units into a squad and send them at the enemy. -->
-    <div id="squad" class="hidden">
-      <div class="hd">Barracks <b id="sqCount"></b></div>
-      <div class="units" id="unitShop"></div>
-      <button class="btn tiny" id="bArmory">Armory</button>
-      <div class="pair">
-        <button class="btn go tiny" id="bDeploy">Deploy now</button>
-        <button class="btn tiny warn" id="bDisband">Disband</button>
-      </div>
-      <div class="line" id="sqLine"></div>
-      <div class="foe" id="sqEnemy"></div>
+    <!-- Frontier only: the base your Commander builds, and how the war stands. -->
+    <div id="army" class="hidden">
+      <div class="hd">Base <b id="armyCount"></b></div>
+      <div class="units" id="baseShop"></div>
+      <div class="line" id="armyLine"></div>
+      <div class="foe" id="armyEnemy"></div>
     </div>
+
+    <div class="shop" id="shop"></div>
 
     <div id="sel" class="hidden"></div>
     <div id="recon" class="hidden"></div>
@@ -66,7 +65,7 @@
 
     <div class="spacer"></div>
 
-    <button class="btn tiny hidden" id="btnHome">Centre on HQ</button>
+    <button class="btn tiny hidden" id="btnHome">Centre on Commander</button>
     <button class="btn foundry" id="btnFoundry">Foundry <b id="cores">0</b> ◈</button>
     <button class="btn tape" id="btnTapes">Blueprints <b id="tapeTally">0</b></button>
     <div class="row">
@@ -103,7 +102,7 @@
 <!-- title screen -->
 <div class="veil" id="start">
   <div class="mark">TURRET<span>TROUBLE</span></div>
-  <p class="modes"><b>Holdout</b> · hold the grid, wave after wave. <b class="fr">Frontier</b> · open maps, enemies that shoot back, and a base to raze.</p>
+  <p class="modes"><b>Holdout</b> · hold the grid, wave after wave. <b class="fr">Frontier</b> · walk a Commander, build factories, and send armies until one side is annihilated.</p>
   <p>Hold the grid. Every kill pays gold for this run and points for the next one.
      Spend those points in the Foundry to start richer, hit harder, and unlock new towers.</p>
   <div class="stats">
@@ -129,7 +128,7 @@
 <div class="veil hidden" id="over">
   <p id="overLead">The line broke.</p>
   <div class="figure" id="overWave">0</div>
-  <p>waves held · <span id="overBestK">best</span> <b id="overBest">0</b> · <b id="overCores">0</b> cores banked</p>
+  <p><span id="overUnit">waves held</span> · <span id="overBestK">best</span> <b id="overBest">0</b> · <b id="overCores">0</b> cores banked</p>
   <div class="veilRow">
     <button class="btn go big hidden" id="btnOverNext">Next sector</button>
     <button class="btn go big" id="btnAgain">Defend again</button>
@@ -171,9 +170,9 @@
   <header>
     <div class="ftitle">
       <h1>Frontier</h1>
-      <span>Every sector is a seeded map: the same ground every time you fly it. Raze the enemy HQ to open the next.</span>
+      <span>Every sector is a seeded map: the same ground every time you fly it. Annihilate the enemy - Commander and every building - to open the next.</span>
     </div>
-    <div class="fbank"><b id="sCleared">0</b><span>sectors razed</span></div>
+    <div class="fbank"><b id="sCleared">0</b><span>sectors won</span></div>
     <button class="btn" id="sClose">Close</button>
   </header>
 
@@ -181,7 +180,7 @@
 
   <footer>
     <div class="fstats" id="sHelp">
-      <span>Drag to scroll · pinch or wheel to zoom · tap the minimap to jump</span>
+      <span>Stick (or WASD) walks the Commander · drag to scroll · pinch or wheel to zoom · tap the minimap to jump</span>
     </div>
   </footer>
 </div>
