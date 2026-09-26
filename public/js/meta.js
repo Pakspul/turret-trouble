@@ -5,7 +5,7 @@
 import {
   NODES, nodeCost, nodeMinWave, TOWERS,
   BASE_START_GOLD, BASE_LIVES, BREAK_SECONDS, FRONTIER_UNLOCK_WAVE,
-  HQ_INTEGRITY, HQ_INTEGRITY_PER_CORE, BUILD_REACH,
+  BUILD_REACH,
   overdriveTop, speedSteps, requisitionMul, critChance, critMult,
   compound, titanBreak
 } from './config.js';
@@ -15,7 +15,7 @@ const BLANK = () => ({
   cores: 0,
   levels: {},
   stats: { bestWave: 0, runs: 0, kills: 0, lifetimePoints: 0, bestScore: 0 },
-  /** Frontier: highest sector razed, and how many sorties were flown. */
+  /** Frontier: highest sector annihilated, sorties flown, longest minutes. */
   frontier: { cleared: 0, runs: 0, bestWaves: 0 }
 });
 
@@ -153,8 +153,9 @@ export function recompute() {
     skipWaves:   10 * lv('headstart'),
     speeds:      speedSteps(overdriveTop(lv('overdrive'))),
 
-    // Frontier: Reinforced Core thickens the HQ instead of adding hearts.
-    integrity:   HQ_INTEGRITY + HQ_INTEGRITY_PER_CORE * lv('core'),
+    // Frontier: your Commander, its units and its towers.
+    cmdHp:       (1 + 0.12 * lv('armour')) * (1 + 0.05 * lv('core')),
+    buildPower:  1 + 0.15 * lv('nanolathe'),
     unitDmg:     1 + 0.08 * lv('drill'),
     unitHp:      1 + 0.08 * lv('plating'),
     towerHp:     1 + 0.10 * lv('hardened'),
