@@ -12,8 +12,6 @@ import * as store from './storage.js';
 const BLANK = () => ({
   cores: 0,
   levels: {},
-  /** The player can switch Head Start off for a run from wave 1. */
-  headStartOff: false,
   stats: { bestWave: 0, runs: 0, kills: 0, lifetimePoints: 0, bestScore: 0 }
 });
 
@@ -86,14 +84,9 @@ export function noteKill() {
   profile.stats.kills++;
 }
 
-/** True when the next run should use the Head Start it owns. */
-export function headStartOn() {
-  return mods.skipWaves > 0 && !profile.headStartOff;
-}
-
-export function toggleHeadStart() {
-  profile.headStartOff = !profile.headStartOff;
-  persist();
+/** True once Head Start is owned, so a new run can open past wave 1. */
+export function headStartOwned() {
+  return mods.skipWaves > 0;
 }
 
 /* ── derived modifiers ─────────────────────────────────────────────────── */
@@ -187,7 +180,8 @@ export function init() {
       profile.levels[id] = Math.max(0, Math.min(NODES[id].max, Number(value) || 0));
     }
     Object.assign(profile.stats, BLANK().stats, saved.stats || {});
-    profile.headStartOff = saved.headStartOff === true;
+    // Older saves carry a `headStartOff` switch; the choice is now made per
+    // run on the start screen, so it is dropped here.
   }
   recompute();
 }
@@ -197,7 +191,6 @@ export function resetProfile() {
   profile.cores = blank.cores;
   profile.levels = blank.levels;
   profile.stats = blank.stats;
-  profile.headStartOff = blank.headStartOff;
   recompute();
   store.wipe();
   store.save(profile);

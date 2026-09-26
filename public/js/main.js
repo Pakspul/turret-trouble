@@ -34,13 +34,14 @@ function leaveRun() {
   endRecording();
 }
 
-ui.actions.play = () => {
+/** Start a new run; `headStart` says whether it opens past wave 1. */
+ui.actions.play = ({ headStart = false } = {}) => {
   audio.unlock();
   leaveRun();
   ui.hideStart();
   ui.el('over').classList.add('hidden');
   ui.el('btnPause').textContent = 'Pause';
-  newRun();
+  newRun({ headStart });
   // newRun only flags the panel dirty; paint it now rather than a frame later.
   dirty = false;
   ui.sync();
@@ -93,7 +94,14 @@ ui.actions.replay = id => {
   recorder.arm(id);
   ui.closeTapes();
 
-  if (S.phase === 'menu' || S.phase === 'dead') { ui.actions.play(); return; }
+  if (S.phase === 'menu' || S.phase === 'dead') {
+    // A build recorded after a Head Start opens its first step past wave 0,
+    // so it gets the same opening back; one built from wave 1 starts there.
+    const bp = recorder.find(id);
+    const headStart = !!(bp && bp.steps.length && bp.steps[0].w > 0);
+    ui.actions.play({ headStart });
+    return;
+  }
   if (S.wave === 0 && !field.grid.some(Boolean)) {
     const armed = recorder.rec.armed;
     recorder.disarm();
@@ -121,6 +129,46 @@ function setDev(on) {
   // Dropping out of dev mode must not leave the run stuck at 10×.
   if (!on && !meta.mods.speeds.includes(S.speed)) S.speed = 1;
   ui.sync();
+}
+
+/* ── keep the screen on ───────────────────────────────────────────────────
+   A phone dims and locks after a minute without a touch, which pauses the
+   page mid-wave. The Screen Wake Lock API holds the screen on while a run
+   is actually playing; the menu, the summary and a paused run let it go.
+   The browser drops the lock whenever the page is hidden, so it is asked
+   for again each frame the conditions hold and no lock is live.          */
+let wakeLock = null;
+let wakeAsking = false;
+/** After a refusal, wait before asking again rather than every frame. */
+let wakeRetryAt = 0;
+
+function wantAwake() {
+  return live() && !S.suspended && !S.paused && document.visibilityState === 'visible';
+}
+
+function syncWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  if (wantAwake()) {
+    if (wakeLock || wakeAsking || performance.now() < wakeRetryAt) return;
+    wakeAsking = true;
+    navigator.wakeLock.request('screen')
+      .then(lock => {
+        wakeLock = lock;
+        lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+        // The run may have ended while the request was in flight.
+        if (!wantAwake()) releaseWakeLock();
+      })
+      .catch(() => { wakeRetryAt = performance.now() + 10000; /* battery saver, or an insecure origin */ })
+      .finally(() => { wakeAsking = false; });
+  } else if (wakeLock) {
+    releaseWakeLock();
+  }
+}
+
+function releaseWakeLock() {
+  const lock = wakeLock;
+  wakeLock = null;
+  if (lock) lock.release().catch(() => {});
 }
 
 /* ── pointer input ────────────────────────────────────────────────────── */
@@ -182,6 +230,7 @@ function frame(now) {
   if (S.phase !== 'dead') wasDead = false;
 
   if (dirty) { dirty = false; ui.sync(); }
+  syncWakeLock();
 
   render.draw();
   requestAnimationFrame(frame);

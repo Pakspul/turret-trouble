@@ -291,8 +291,12 @@ export function showStart() {
   const parked = S.suspended;
   el('btnResume').classList.toggle('hidden', !parked);
   el('btnResume').textContent = `Resume wave ${Math.max(1, S.wave)}`;
-  el('btnPlay').textContent = parked ? 'New run' : 'Start defending';
   el('btnPlay').classList.toggle('go', !parked);
+  el('btnPlayHead').classList.toggle('go', !parked);
+  // The breakdown of the run behind the menu, so a glance at Menu answers
+  // "how is this run going?".
+  el('startReport').classList.toggle('hidden', !parked);
+  if (parked) el('startReport').innerHTML = runReport();
   el('start').classList.remove('hidden');
   el('over').classList.add('hidden');
   syncArmed();
@@ -309,16 +313,23 @@ export function syncArmed() {
   syncHeadStart();
 }
 
-/** The Head Start switch, shown only once the node is owned. */
+/**
+ * Once Head Start is owned, every new run is an explicit choice between two
+ * buttons - wave 1, or past the skipped waves - rather than a remembered
+ * switch that is easy to flip by accident and then forget about.
+ */
 function syncHeadStart() {
-  const owned = meta.mods.skipWaves > 0;
-  const text = meta.headStartOn()
-    ? `Head start on · run opens at wave ${meta.mods.skipWaves + 1}`
-    : 'Head start off · run opens at wave 1';
-  for (const id of ['startSkip', 'overSkip']) {
-    el(id).textContent = text;
+  const owned = meta.headStartOwned();
+  const opens = meta.mods.skipWaves + 1;
+  const parked = S.suspended;
+  const fresh = parked ? 'New run' : 'Start defending';
+
+  el('btnPlay').textContent = owned ? `${fresh} · wave 1` : fresh;
+  el('btnAgain').textContent = owned ? 'Again · wave 1' : 'Defend again';
+  for (const id of ['btnPlayHead', 'btnAgainHead']) {
     el(id).classList.toggle('hidden', !owned);
-    el(id).classList.toggle('on', meta.headStartOn());
+    el(id).textContent = `Head start · wave ${opens}`;
+    el(id).title = `Skip waves 1-${opens - 1}; they are paid out as if held`;
   }
 }
 
@@ -328,9 +339,6 @@ export function hideStart() {
 
 export function showGameOver() {
   el('overWave').textContent = S.wavesCleared;
-  // Factory Cores are banked but kept out of the score, so show them apart.
-  el('overScore').textContent = S.score.toLocaleString() + (S.minted ? ` +${S.minted.toLocaleString()} ◈` : '');
-  el('overKills').textContent = S.kills;
   el('overBest').textContent = meta.profile.stats.bestWave;
   el('overCores').textContent = meta.profile.cores.toLocaleString();
   el('overLead').textContent = S.wavesCleared <= 3
@@ -346,8 +354,91 @@ export function showGameOver() {
     replay.title = `${bp.name} · saved to Blueprints`;
   }
 
+  el('overReport').innerHTML = runReport();
   el('over').classList.remove('hidden');
   syncArmed();
+}
+
+/* ── the run report ───────────────────────────────────────────────────────
+   Shared by the menu (for a run that is parked) and the summary screen:
+   damage by tower, kills and leaks by enemy, and what the run earned.    */
+
+/** 1234 -> "1,234", 1234567 -> "1.23M": damage runs into the billions. */
+function big(n) {
+  n = Math.round(n);
+  if (n < 1e5) return n.toLocaleString();
+  const units = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'k']];
+  for (const [size, tag] of units) {
+    if (n >= size) return (n / size).toPrecision(3) + tag;
+  }
+  return String(n);
+}
+
+function towerCounts() {
+  const out = {};
+  for (const t of field.grid) if (t) out[t.k] = (out[t.k] || 0) + 1;
+  return out;
+}
+
+export function runReport() {
+  const T = S.tally;
+  if (!T) return '';
+  const built = towerCounts();
+
+  const fought = S.kills - T.headKills;
+  const leaked = Object.values(T.leaks).reduce((a, b) => a + b, 0);
+  const summary = [
+    `<div><b>${big(S.kills)}</b><span>kills${T.headKills ? ` · ${big(T.headKills)} head start` : ''}</span></div>`,
+    `<div><b>${big(S.score)}</b><span>points scored</span></div>`,
+    `<div><b>${big(S.minted)} ◈</b><span>cores minted</span></div>`,
+    `<div><b>${leaked}</b><span>leaked</span></div>`
+  ].join('');
+
+  // Towers: everything built now, plus anything that dealt damage before it
+  // was sold, strongest first.
+  const total = Object.values(T.dmg).reduce((a, b) => a + b, 0) || 1;
+  const kinds = TOWER_ORDER.filter(k => built[k] || T.dmg[k] || T.towerKills[k]);
+  kinds.sort((a, b) => (T.dmg[b] || 0) - (T.dmg[a] || 0));
+  const towerRows = kinds.map(k => {
+    const def = TOWERS[k];
+    // Portals and Factories deal no damage; show what they do instead.
+    const pct = 100 * (T.dmg[k] || 0) / total;
+    const dealt = def.kind === 'portal' ? `${big(T.warps)} sent back`
+      : def.kind === 'factory' ? `${big(S.minted)} ◈`
+      : big(T.dmg[k] || 0);
+    const share = def.kind === 'portal' || def.kind === 'factory' ? '' : Math.round(pct) + '%';
+    return `<tr style="--c:${def.color}">
+      <td class="nm"><i></i>${def.name}</td>
+      <td>${built[k] || 0}</td>
+      <td class="bar"><span style="width:${pct.toFixed(1)}%"></span><em>${dealt}</em></td>
+      <td>${share}</td>
+      <td>${big(T.towerKills[k] || 0)}</td>
+    </tr>`;
+  }).join('');
+
+  const foes = Object.keys(FOES).filter(k => T.kills[k] || T.leaks[k]);
+  const foeRows = foes.map(k => `<tr style="--c:${FOES[k].col}">
+      <td class="nm"><i></i>${FOES[k].name}</td>
+      <td>${big(T.kills[k] || 0)}</td>
+      <td class="${T.leaks[k] ? 'bad' : ''}">${T.leaks[k] || 0}</td>
+    </tr>`).join('');
+
+  const none = text => `<p class="empty">${text}</p>`;
+  return `<div class="stats">${summary}</div>
+    <div class="tables">
+      <section>
+        <h3>Towers</h3>
+        ${kinds.length ? `<table>
+          <thead><tr><th>tower</th><th>built</th><th>damage</th><th>share</th><th>kills</th></tr></thead>
+          <tbody>${towerRows}</tbody></table>` : none('No towers built yet.')}
+      </section>
+      <section>
+        <h3>Enemies${fought !== S.kills ? ' · in play' : ''}</h3>
+        ${foes.length ? `<table>
+          <thead><tr><th>enemy</th><th>killed</th><th>leaked</th></tr></thead>
+          <tbody>${foeRows}</tbody></table>` : none('Nothing has come through the gate yet.')}
+      </section>
+    </div>`;
 }
 
 /* ── the Foundry ──────────────────────────────────────────────────────── */
@@ -735,17 +826,16 @@ export function bind() {
     sync();
   };
 
-  for (const id of ['startSkip', 'overSkip']) {
-    el(id).onclick = () => { meta.toggleHeadStart(); syncHeadStart(); };
-  }
-
   el('btnResume').onclick = () => { autoFullscreen(); actions.resume(); };
-  el('btnPlay').onclick = () => {
+  const fromMenu = headStart => () => {
     if (S.suspended && !confirm(`End the wave ${Math.max(1, S.wave)} run and start a new one?`)) return;
     autoFullscreen();
-    actions.play();
+    actions.play({ headStart });
   };
-  el('btnAgain').onclick = () => { autoFullscreen(); actions.play(); };
+  el('btnPlay').onclick = fromMenu(false);
+  el('btnPlayHead').onclick = fromMenu(true);
+  el('btnAgain').onclick = () => { autoFullscreen(); actions.play({ headStart: false }); };
+  el('btnAgainHead').onclick = () => { autoFullscreen(); actions.play({ headStart: true }); };
   el('btnMenu').onclick = () => actions.menu();
 
   el('btnMute').onclick = () => {
