@@ -160,6 +160,24 @@ export const TOWER_ORDER = ['gun', 'rocket', 'laser', 'frost', 'tesla', 'portal'
 
 /** Titans shrug off a Portal; everything else can be sent home. */
 export const PORTAL_SPARES_BOSSES = true;
+
+/* ── titans ───────────────────────────────────────────────────────────────
+   A boss wave used to read its Titans off the wave's own health curve, so
+   late on three of them carried more health than the rest of the wave put
+   together and leaked no matter what. Past wave 30 they now trail the
+   curve, reaching a full boss behind (ten waves) by wave 80, and walk in
+   further apart so the maze meets them one at a time.                    */
+/** Waves of health a Titan trails the wave it arrives on. */
+export const titanLag = w => Math.min(10, Math.max(0, (w - 30) / 5));
+/** Seconds between Titans in the same boss wave. */
+export const TITAN_GAP = 4;
+/** Titan Breaker: share of a boss's max health each tower strips per second
+    of fire, rising towards TITAN_BREAK_CAP. It ignores armour and scales
+    with the boss, so it keeps pace with any health curve without ever
+    doing the whole job on its own. */
+export const TITAN_BREAK_CAP = 0.005;
+export const TITAN_BREAK_DECAY = 0.92;
+export const titanBreak = l => TITAN_BREAK_CAP * (1 - Math.pow(TITAN_BREAK_DECAY, l));
 /** Endless Portal levels shorten the cooldown by this factor, to a floor. */
 export const PORTAL_ENDLESS_RATE = 0.93;
 export const PORTAL_MIN_RATE = 1.5;
@@ -357,6 +375,12 @@ export const sectorBounty = s => Math.round(18 * wavePoints(sectorDepth(s) + 20)
 /** `max` for a node with no final rank. */
 export const ENDLESS = Infinity;
 
+/** Damage and fire-rate ranks compound, so every rank buys the same share
+    of progress however many came before it. A flat +7% a rank was worth
+    less each time while the price kept multiplying - a hard wall. */
+export const compound = (step, l) => Math.pow(1 + step, l);
+const pct = m => `+${Math.round((m - 1) * 100)}%`;
+
 /** Requisition compounds, so no number of ranks makes turrets free. */
 export const requisitionMul = l => Math.pow(0.97, l);
 /** Overcharge stops adding chance at 100%; ranks past that add crit damage. */
@@ -395,29 +419,33 @@ export const FOUNDRY = [
     id: 'ordnance', name: 'Ordnance', hint: 'Hit harder, hit faster.',
     nodes: [
       { id: 'munitions',  name: 'Kinetic Munitions', max: ENDLESS, base: 140, growth: 1.45,
-        step: '+6% Gun damage',
+        step: '×1.06 Gun damage (compounding)',
         blurb: 'Denser slugs out of every Gun barrel.',
-        value: l => `+${6 * l}% Gun damage` },
+        value: l => `${pct(compound(0.06, l))} Gun damage` },
       { id: 'warheads',   name: 'Warheads',          max: ENDLESS, base: 190, growth: 1.48,
-        step: '+7% Rocket damage',
+        step: '×1.07 Rocket damage (compounding)',
         blurb: 'Heavier payload on every Rocket.',
-        value: l => `+${7 * l}% Rocket damage` },
+        value: l => `${pct(compound(0.07, l))} Rocket damage` },
       { id: 'lens',       name: 'Focusing Lens',     max: ENDLESS, base: 175, growth: 1.48,
-        step: '+7% Laser damage',
+        step: '×1.07 Laser damage (compounding)',
         blurb: 'Tighter beam, more energy on target.',
-        value: l => `+${7 * l}% Laser damage` },
+        value: l => `${pct(compound(0.07, l))} Laser damage` },
       { id: 'guidance',   name: 'Guidance Chips',    max: ENDLESS, base: 220, growth: 1.50,
         step: '+14% Rocket speed, +4% blast radius',
         blurb: 'Rockets that actually catch what they were aimed at.',
         value: l => `+${14 * l}% speed · +${4 * l}% blast` },
       { id: 'loaders',    name: 'Rapid Loaders',     max: ENDLESS, base: 260, growth: 1.55,
-        step: '+4% fire rate (all towers)',
+        step: '×1.04 fire rate, all towers (compounding)',
         blurb: 'Shorter reload cycle across the whole grid.',
-        value: l => `+${4 * l}% fire rate` },
+        value: l => `${pct(compound(0.04, l))} fire rate` },
       { id: 'ap',         name: 'AP Rounds',         max: ENDLESS, base: 210, growth: 1.50,
         step: '+3 armour pierce',
         blurb: 'Cuts through Tank and Bulwark plating.',
         value: l => `+${3 * l} pierce` },
+      { id: 'titanbreak', name: 'Titan Breaker',   max: ENDLESS, base: 2000, growth: 1.40, minWave: 40,
+        step: 'Towers strip a share of a Titan\'s max health',
+        blurb: 'Every second a tower spends firing on a Titan also tears off a slice of its maximum health, straight through the armour. It scales with the Titan, so it never falls behind, but each rank adds less than the last. Needs wave 40.',
+        value: l => `${(titanBreak(l) * 100).toFixed(2)}% of max health per tower-second` },
       { id: 'barrels',    name: 'Long Barrels',      max: 6, base: 230, growth: 1.55,
         step: '+4% range (all towers)',
         blurb: 'Every tower covers more of the grid.',
@@ -441,16 +469,16 @@ export const FOUNDRY = [
         step: 'Cryo hits air, +15% slow',
         blurb: 'Cryo pulses reach flyers and bite noticeably harder.' },
       { id: 'cryocoils',  name: 'Cryo Coils',      max: ENDLESS, base: 260, growth: 1.40, req: 'frost',
-        step: '+8% Cryo damage, +3% slow, +3% chill time',
+        step: '×1.08 Cryo damage (compounding), +3% slow, +3% chill time',
         blurb: 'Small steps, but they add up: late waves need a Cryo that still holds the line.',
-        value: l => `+${8 * l}% damage · +${3 * l}% slow · +${3 * l}% chill` },
+        value: l => `${pct(compound(0.08, l))} damage · +${3 * l}% slow · +${3 * l}% chill` },
       { id: 'flak',       name: 'Flak Warheads',   max: 1, base: 4000, growth: 1, minWave: 40,
         step: 'Rockets also hit air',
         blurb: 'Proximity fuses let every Rocket and its splash reach flyers. Only unlocks once you have held wave 40.' },
       { id: 'capacitors', name: 'Capacitors',      max: ENDLESS, base: 240,  growth: 1.50, req: 'tesla',
-        step: '+7% Tesla damage',
+        step: '×1.07 Tesla damage (compounding)',
         blurb: 'More charge stored between arcs.',
-        value: l => `+${7 * l}% Tesla damage` },
+        value: l => `${pct(compound(0.07, l))} Tesla damage` },
       { id: 'overload',   name: 'Overload Coils',  max: ENDLESS, base: 800,  growth: 1.60, req: 'tesla',
         step: '+1 arc jump',
         blurb: 'Each Tesla shot chains to more targets.',

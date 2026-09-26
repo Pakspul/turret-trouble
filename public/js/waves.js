@@ -3,7 +3,7 @@
    spawn time. Waves are generated one ahead so Recon Uplink can show the
    exact roster the player is about to face.                              */
 
-import { SPAWN_TABLE } from './config.js';
+import { SPAWN_TABLE, titanLag, TITAN_GAP } from './config.js';
 
 export function buildWave(w) {
   const list = [];
@@ -30,8 +30,9 @@ export function buildWave(w) {
 
   if (w % 10 === 0) {
     const bosses = 1 + Math.floor(w / 40);
+    const titanHp = Math.pow(1.135, w - 1 - titanLag(w)) * 0.85;
     for (let b = 0; b < bosses; b++) {
-      list.push({ type: 'titan', at: at + 1 + b * 2.2, hpMul: hpMul * 0.85, spdMul });
+      list.push({ type: 'titan', at: at + 1 + b * TITAN_GAP, hpMul: titanHp, spdMul });
     }
   }
 

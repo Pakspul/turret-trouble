@@ -30,7 +30,7 @@ import {
 } from './config.js';
 import { generate, sectorSeed, flowField, rng, at, colOf, rowOf } from './terrain.js';
 import { buildWave } from './waves.js';
-import { S, statsOf, maxTier } from './game.js';
+import { S, statsOf, maxTier, titanShred } from './game.js';
 import * as meta from './meta.js';
 import * as recorder from './recorder.js';
 import { sfx } from './audio.js';
@@ -697,10 +697,10 @@ function walkUnit(u, dt) {
 
 /* ── damage ───────────────────────────────────────────────────────────── */
 /** Hurt an enemy walker. `src` is a tower kind or 'unit'. */
-function hurt(e, dmg, pierce, colour, crit, src) {
+function hurt(e, dmg, pierce, colour, crit, src, secs = 0) {
   if (e.dead) return;
   const soak = Math.max(0, e.def.armor - (pierce || 0));
-  const dealt = dmg * (1 - soak);
+  const dealt = dmg * (1 - soak) + titanShred(e, secs);
   if (src && src !== 'unit') bump(S.tally.dmg, src, Math.min(dealt, Math.max(0, e.hp)));
   e.hp -= dealt;
   e.hit = crit ? 0.2 : 0.12;
@@ -836,7 +836,7 @@ function tickTower(t, dt) {
       if (e.dead || (e.def.fly && !hitsAir)) continue;
       if (Math.hypot(e.x - t.x, e.y - t.y) > range) continue;
       chill(e, st.slow, st.slowDur);
-      hurt(e, st.dmg, st.pierce, def.color, false, t.k);
+      hurt(e, st.dmg, st.pierce, def.color, false, t.k, st.rate);
       touched++;
     }
     if (touched) { t.cd = st.rate; t.ring = 1; sfx.freeze(); }
@@ -853,7 +853,7 @@ function tickTower(t, dt) {
     t.focus = t.lock === target ? Math.min(2.2, t.focus + dt) : 0;
     t.lock = target;
     const ramp = 1 + (t.focus / 2.2) * st.ramp;
-    hurt(target, st.dps * ramp * meta.critAverage() * dt, st.pierce, def.color, false, t.k);
+    hurt(target, st.dps * ramp * meta.critAverage() * dt, st.pierce, def.color, false, t.k, dt);
     return;
   }
 
@@ -869,7 +869,7 @@ function tickTower(t, dt) {
     k: t.k, x: t.x, y: t.y, tgt: target,
     spd: t.k === 'gun' ? 15 : 7.5 * meta.mods.rocketSpeed,
     dmg: st.dmg, pierce: st.pierce, splash: st.splash, air: hitsAir,
-    crit: meta.rollCrit(), col: def.color, life: 2.2, src: t.k
+    crit: meta.rollCrit(), col: def.color, life: 2.2, src: t.k, secs: st.rate
   });
   if (t.k === 'rocket') sfx.rocket();
 }
@@ -883,7 +883,7 @@ function fireChain(t, st, first) {
   for (let jump = 0; jump < st.chains && current; jump++) {
     seen.add(current);
     points.push({ x: current.x, y: current.y });
-    hurt(current, damage, st.pierce, TOWERS.tesla.color, crit && jump === 0, t.k);
+    hurt(current, damage, st.pierce, TOWERS.tesla.color, crit && jump === 0, t.k, jump === 0 ? st.rate : 0);
     damage *= CHAIN_FALLOFF;
     let next = null, bestD = CHAIN_REACH;
     for (const e of S.foes) {
@@ -927,11 +927,11 @@ function tickShot(s, dt) {
     for (const e of S.foes) {
       if (e.dead || (e.def.fly && !s.air)) continue;
       const dd = Math.hypot(e.x - s.x, e.y - s.y);
-      if (dd <= s.splash) hurt(e, s.dmg * mult * (1 - 0.45 * (dd / s.splash)), s.pierce, s.col, s.crit, s.src);
+      if (dd <= s.splash) hurt(e, s.dmg * mult * (1 - 0.45 * (dd / s.splash)), s.pierce, s.col, s.crit, s.src, e === target ? s.secs : 0);
     }
     sfx.blast();
   } else if (alive) {
-    hurt(target, s.dmg * mult, s.pierce, s.col, s.crit, s.src);
+    hurt(target, s.dmg * mult, s.pierce, s.col, s.crit, s.src, s.secs);
   }
   return false;
 }

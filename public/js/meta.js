@@ -6,7 +6,8 @@ import {
   NODES, nodeCost, nodeMinWave, TOWERS,
   BASE_START_GOLD, BASE_LIVES, BREAK_SECONDS, FRONTIER_UNLOCK_WAVE,
   HQ_INTEGRITY, HQ_INTEGRITY_PER_CORE, BUILD_REACH,
-  overdriveTop, speedSteps, requisitionMul, critChance, critMult
+  overdriveTop, speedSteps, requisitionMul, critChance, critMult,
+  compound, titanBreak
 } from './config.js';
 import * as store from './storage.js';
 
@@ -110,11 +111,11 @@ export function headStartOwned() {
 export function recompute() {
   const dmg = {};
   for (const key of Object.keys(TOWERS)) dmg[key] = 1;
-  dmg.gun    += 0.06 * lv('munitions');
-  dmg.rocket += 0.07 * lv('warheads');
-  dmg.laser  += 0.07 * lv('lens');
-  dmg.tesla  += 0.07 * lv('capacitors');
-  dmg.frost  += 0.08 * lv('cryocoils');
+  dmg.gun    *= compound(0.06, lv('munitions'));
+  dmg.rocket *= compound(0.07, lv('warheads'));
+  dmg.laser  *= compound(0.07, lv('lens'));
+  dmg.tesla  *= compound(0.07, lv('capacitors'));
+  dmg.frost  *= compound(0.08, lv('cryocoils'));
 
   Object.assign(mods, {
     startGold:   BASE_START_GOLD + 20 * lv('seed'),
@@ -127,13 +128,14 @@ export function recompute() {
 
     dmg,
     // Lower `rate` means a shorter reload, so fire-rate ranks divide it.
-    rate:        1 / (1 + 0.04 * lv('loaders')),
+    rate:        1 / compound(0.04, lv('loaders')),
     range:       1 + 0.04 * lv('barrels'),
     pierce:      0.03 * lv('ap'),
     splash:      1 + 0.04 * lv('guidance'),
     rocketSpeed: 1 + 0.14 * lv('guidance'),
     crit:        critChance(lv('crit')),
     critMult:    critMult(lv('crit')),
+    titanBreak:  titanBreak(lv('titanbreak')),
 
     chainBonus:  lv('overload'),
     slowBonus:   (has('deepfreeze') ? 0.15 : 0) + 0.03 * lv('cryocoils'),

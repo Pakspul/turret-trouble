@@ -12,6 +12,7 @@ const cfg = await import('../public/js/config.js');
 const meta = await import('../public/js/meta.js');
 const game = await import('../public/js/game.js');
 const field = await import('../public/js/field.js');
+const { buildWave } = await import('../public/js/waves.js');
 
 const { S } = game;
 
@@ -310,7 +311,7 @@ assert(S.tally.headKills === 0 && !Object.keys(S.tally.kills).length, 'a new run
 meta.profile.cores = 1e12;
 const endlessIds = ['seed', 'bounty', 'dividend', 'interest', 'requisition', 'munitions', 'warheads',
   'lens', 'guidance', 'loaders', 'ap', 'crit', 'cryocoils', 'capacitors', 'overload', 'siphon',
-  'phase', 'refinery', 'headstart'];
+  'phase', 'refinery', 'headstart', 'titanbreak'];
 for (const id of endlessIds) assert(cfg.NODES[id].max === Infinity, `${id} should be endless`);
 for (const id of ['barrels', 'core', 'overdrive', 'drills']) {
   assert(Number.isFinite(cfg.NODES[id].max), `${id} keeps its cap`);
@@ -360,5 +361,38 @@ assert(game.statsOf(plant).yield > yield0, 'Core Refinery raises output');
 game.upgrade(plant);
 assert(game.statsOf(plant).yield > yield0 * 1.15, 'factory levels raise output');
 assert(game.dpsOf(plant) === 0, 'a factory deals no damage');
+
+/* ── 17. damage ranks compound ───────────────────────────────── */
+meta.profile.cores = 1e12;
+meta.profile.levels.warheads = 0; meta.profile.levels.loaders = 0; meta.recompute();
+for (let n = 0; n < 20; n++) meta.buy('warheads');
+assert(Math.abs(meta.mods.dmg.rocket - Math.pow(1.07, 20)) < 1e-9, `Warheads compound, got ${meta.mods.dmg.rocket}`);
+const r19 = Math.pow(1.07, 19);
+assert(meta.mods.dmg.rocket / r19 > 1.069, 'rank 20 is worth as much as rank 1');
+for (let n = 0; n < 10; n++) meta.buy('loaders');
+assert(Math.abs(meta.mods.rate - 1 / Math.pow(1.04, 10)) < 1e-9, `Rapid Loaders compound, got ${meta.mods.rate}`);
+
+/* ── 18. Titans trail the health curve and arrive spaced out ─── */
+const bossWave = buildWave(90);
+const titans = bossWave.filter(o => o.type === 'titan');
+const grunts = bossWave.filter(o => o.type !== 'titan');
+assert(titans.length === 3, `wave 90 sends three Titans, got ${titans.length}`);
+assert(Math.abs(titans[0].hpMul / grunts[0].hpMul - 0.85 / Math.pow(1.135, 10)) < 1e-9,
+  'a wave-90 Titan reads its health a full boss behind');
+assert(Math.abs(buildWave(30).find(o => o.type === 'titan').hpMul / Math.pow(1.135, 29) - 0.85) < 1e-9,
+  'early Titans are unchanged');
+assert(titans[1].at - titans[0].at >= cfg.TITAN_GAP - 1e-9, 'Titans walk in spaced out');
+
+/* ── 19. Titan Breaker strips max health, bosses only ────────── */
+meta.profile.stats.bestWave = 39;
+assert(!meta.buy('titanbreak'), 'Titan Breaker needs wave 40');
+meta.profile.stats.bestWave = 40;
+assert(meta.buy('titanbreak'), 'Titan Breaker unlocks at wave 40');
+assert(meta.mods.titanBreak > 0, 'Titan Breaker sets a shred rate');
+const boss = { def: cfg.FOES.titan, max: 1e9 };
+assert(Math.abs(game.titanShred(boss, 2) - 1e9 * meta.mods.titanBreak * 2) < 1e-3, 'shred follows time on target');
+assert(game.titanShred({ def: cfg.FOES.tank, max: 1e9 }, 2) === 0, 'only bosses are shredded');
+for (let n = 0; n < 200; n++) meta.buy('titanbreak');
+assert(meta.mods.titanBreak < cfg.TITAN_BREAK_CAP, 'Titan Breaker never reaches its cap');
 
 console.log(process.exitCode ? 'SMOKE TEST FAILED' : 'SMOKE TEST PASSED');

@@ -63,6 +63,11 @@ constants live at the top of `config.js`:
   but each level past 4 adds ×1.25 damage for ×1.45 the price of the last —
   so the board fills slowly, mixed builds beat spamming one type, and a run
   ends when the grid can no longer out-damage the health curve.
+- **Titans trail the curve.** Every tenth wave ends with Titans (one, plus one
+  more per 40 waves). Past wave 30 their health lags the wave they arrive on,
+  reaching a full boss (ten waves) behind by wave 80, and they walk in 4 s
+  apart. Without that, three late Titans outweighed the rest of the wave and
+  every boss wave cost more breaches than Field Repair could return.
 - **Points are back-loaded.** Kills pay a thin flat trickle; the real income is
   `0.7 × wave^1.6` for *holding* a wave. Farming shallow waves gets you
   nowhere, so the Foundry is funded by depth, not by time spent.
@@ -85,17 +90,25 @@ shows a badge in the panel. The setting is remembered in `localStorage`; press
 
 ### The Foundry
 
-Thirty-two upgrade nodes across five branches. Most of the scaling nodes
+Thirty-seven upgrade nodes across five branches. Most of the scaling nodes
 are **endless**: instead of filling up and reading "Fully upgraded" they show
 their rank (`lvl 12`) and keep going, each rank costing a fixed multiple of the
 last. Only Long Barrels, Reinforced Core, Overdrive and Rapid Deployment keep a
 final rank, along with the one-time unlocks. Requisition compounds (−3% of
 what is left), and Overcharge adds crit damage once crit chance reaches 100%.
+The per-tower damage ranks and Rapid Loaders **compound** too (×1.07 a rank
+rather than +7%), so a rank bought late is worth as much as the first one —
+the rising price is the only brake, and the wall it builds is a slope.
 
 - **Logistics** — Seed Capital (start with more than 240 gold), Bounty Optics,
   Wave Dividend, Compound Interest, Requisition (cheaper turrets).
 - **Ordnance** — per-tower damage, Guidance Chips (faster rockets, bigger
-  blast), Rapid Loaders, AP Rounds, Long Barrels, Overcharge (crits).
+  blast), Rapid Loaders, AP Rounds, Titan Breaker, Long Barrels, Overcharge
+  (crits). **Titan Breaker** (needs wave 40) makes every second a tower spends
+  firing on a Titan also strip a slice of its *maximum* health, through its
+  armour — about 0.04% a tower-second at rank 1, closing in on 0.5% but never
+  reaching it. Because it scales with the Titan it never falls behind the
+  health curve.
 - **Tech Branch** — unlocks the **Cryo** tower (pulsing slow field) and the
   **Tesla** tower (chain lightning), plus Deep Freeze, Cryo Coils (slow,
   steady Cryo growth), Capacitors, Overload Coils, Prototype Cores (level 4
@@ -281,6 +294,8 @@ test/
   recorder.mjs            headless test of recording, replay and its limits
   balance.mjs             plays a full run and prints the economy curve
   frontier.mjs            terrain, routing, fire-back, units and victory; --probe
+docs/
+  ROADMAP.md              agreed-in-spirit design notes not built yet
 archive/
   grid-siege-v1.html      the original single-file version, kept for reference
 ```

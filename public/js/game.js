@@ -305,10 +305,13 @@ function breach(e) {
 }
 
 /* ── damage ───────────────────────────────────────────────────────────── */
-function hurt(e, dmg, pierce, colour, crit, src) {
+/* `secs` is how many seconds of the tower's fire this hit stands for (its
+   reload, or the frame for a beam). Titan Breaker turns it into a share of
+   a boss's max health, so the bonus follows time on target, not hit count. */
+function hurt(e, dmg, pierce, colour, crit, src, secs = 0) {
   if (e.dead) return;
   const soak = Math.max(0, e.def.armor - (pierce || 0));
-  const dealt = dmg * (1 - soak);
+  const dealt = dmg * (1 - soak) + titanShred(e, secs);
   if (src) bump(S.tally.dmg, src, Math.min(dealt, Math.max(0, e.hp)));
   e.hp -= dealt;
   e.hit = crit ? 0.2 : 0.12;
@@ -339,6 +342,12 @@ function hurt(e, dmg, pierce, colour, crit, src) {
   if (e.def.boss) { sfx.boss(); S.shake = 0.7; }
   else if (Math.random() < 0.25) sfx.kill();
   touch();
+}
+
+/** Titan Breaker's slice of a boss's max health, straight through armour. */
+export function titanShred(e, secs) {
+  if (!secs || !e.def.boss || !meta.mods.titanBreak) return 0;
+  return e.max * meta.mods.titanBreak * secs;
 }
 
 function chill(e, amount, duration) {
@@ -440,7 +449,7 @@ function tickTower(t, dt) {
       if (e.def.fly && !hitsAir) continue;
       if (Math.hypot(e.x - tx, e.y - ty) > st.range) continue;
       chill(e, st.slow, st.slowDur);
-      hurt(e, st.dmg, st.pierce, def.color, false, t.k);
+      hurt(e, st.dmg, st.pierce, def.color, false, t.k, st.rate);
       touched++;
     }
     if (touched) { t.cd = st.rate; t.ring = 1; sfx.freeze(); }
@@ -457,7 +466,7 @@ function tickTower(t, dt) {
     t.focus = t.lock === target ? Math.min(2.2, t.focus + dt) : 0;
     t.lock = target;
     const ramp = 1 + (t.focus / 2.2) * st.ramp;
-    hurt(target, st.dps * ramp * meta.critAverage() * dt, st.pierce, def.color, false, t.k);
+    hurt(target, st.dps * ramp * meta.critAverage() * dt, st.pierce, def.color, false, t.k, dt);
     return;
   }
 
@@ -480,7 +489,7 @@ function tickTower(t, dt) {
     k: t.k, x: tx, y: ty, tgt: target,
     spd: t.k === 'gun' ? 15 : 7.5 * meta.mods.rocketSpeed,
     dmg: st.dmg, pierce: st.pierce, splash: st.splash, air: hitsAir,
-    crit: meta.rollCrit(), col: def.color, life: 2.2
+    crit: meta.rollCrit(), col: def.color, life: 2.2, secs: st.rate
   });
   if (t.k === 'rocket') sfx.rocket();
 }
@@ -497,7 +506,7 @@ function fireChain(t, st, first, tx, ty) {
   for (let jump = 0; jump < st.chains && current; jump++) {
     seen.add(current);
     points.push({ x: current.x, y: current.y });
-    hurt(current, damage, st.pierce, TOWERS.tesla.color, crit && jump === 0, t.k);
+    hurt(current, damage, st.pierce, TOWERS.tesla.color, crit && jump === 0, t.k, jump === 0 ? st.rate : 0);
     damage *= CHAIN_FALLOFF;
 
     let next = null, bestD = CHAIN_REACH;
@@ -569,12 +578,12 @@ function tickShot(s, dt) {
       if (e.dead || (e.def.fly && !s.air)) continue;
       const dd = Math.hypot(e.x - s.x, e.y - s.y);
       if (dd <= s.splash) {
-        hurt(e, s.dmg * mult * (1 - 0.45 * (dd / s.splash)), s.pierce, s.col, s.crit, s.k);
+        hurt(e, s.dmg * mult * (1 - 0.45 * (dd / s.splash)), s.pierce, s.col, s.crit, s.k, e === target ? s.secs : 0);
       }
     }
     sfx.blast();
   } else if (alive) {
-    hurt(target, s.dmg * mult, s.pierce, s.col, s.crit, s.k);
+    hurt(target, s.dmg * mult, s.pierce, s.col, s.crit, s.k, s.secs);
   }
   return false;
 }
