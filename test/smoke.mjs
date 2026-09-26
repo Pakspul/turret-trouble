@@ -119,6 +119,11 @@ assert(S.wavesCleared > 0, `should clear at least one wave, cleared ${S.wavesCle
 assert(S.score > 0, 'should score points');
 assert(meta.profile.cores > startCores, 'points should bank into cores');
 assert(meta.profile.stats.kills > 0, 'kills should be recorded');
+assert(S.tally.dmg.gun > 0 && S.tally.dmg.rocket > 0 && S.tally.dmg.laser > 0,
+  `every tower kind should be credited with damage, got ${JSON.stringify(S.tally.dmg)}`);
+const byTower = Object.values(S.tally.towerKills).reduce((a, b) => a + b, 0);
+assert(byTower === S.kills, `every kill should go to a tower, ${byTower} vs ${S.kills}`);
+assert(Object.values(S.tally.leaks).reduce((a, b) => a + b, 0) >= S.maxLives, 'the leaks that broke the line are counted');
 console.log(`run: wave ${S.wave}, cleared ${S.wavesCleared}, score ${S.score}, kills ${S.kills}, cores ${meta.profile.cores}`);
 
 /* ── 4. foundry purchases and their effect ───────────────────── */
@@ -279,6 +284,8 @@ assert(!meta.buy('headstart'), 'the second Head Start rank needs wave 40');
 
 const coresBefore = meta.profile.cores;
 game.newRun();
+assert(S.wave === 0, 'owning Head Start does not use it unless the run asks for it');
+game.newRun({ headStart: true });
 assert(S.wave === 10 && S.wavesCleared === 10, `Head Start should open after wave 10, got ${S.wave}`);
 assert(S.gold > 2000, `the skipped waves should pay gold, got ${S.gold}`);
 assert(meta.profile.cores === coresBefore, 'Head Start points wait for the first real wave');
@@ -291,10 +298,13 @@ assert(S.wavesCleared === 11, `wave 11 should be held, got ${S.wavesCleared}`);
 assert(meta.profile.cores - coresBefore >= Math.floor(held), 'holding wave 11 pays the Head Start points');
 assert(S.heldPoints === 0, 'the Head Start points are paid only once');
 
-meta.toggleHeadStart();
-game.newRun();
-assert(S.wave === 0, 'switching Head Start off opens at wave 1');
-meta.toggleHeadStart();
+assert(S.tally.headKills > 0, 'the report counts the kills Head Start paid out');
+const inPlay = Object.values(S.tally.kills).reduce((a, b) => a + b, 0);
+assert(inPlay === S.kills - S.tally.headKills, `kills by enemy should add up, ${inPlay} vs ${S.kills - S.tally.headKills}`);
+
+game.newRun({ headStart: false });
+assert(S.wave === 0, 'choosing wave 1 opens at wave 1');
+assert(S.tally.headKills === 0 && !Object.keys(S.tally.kills).length, 'a new run starts a fresh report');
 
 /* ── 14. endless Foundry research ────────────────────────────── */
 meta.profile.cores = 1e12;

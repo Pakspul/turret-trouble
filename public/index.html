@@ -99,11 +99,12 @@
   <div class="veilRow">
     <button class="btn go big hidden" id="btnResume">Resume</button>
     <button class="btn go big" id="btnPlay">Start defending</button>
+    <button class="btn go big hidden" id="btnPlayHead">Head start</button>
     <button class="btn big" id="btnStartFoundry">Foundry</button>
     <button class="btn big" id="btnStartTapes">Blueprints</button>
   </div>
   <p class="armed hidden" id="startArmed"></p>
-  <button class="btn tiny hidden skipToggle" id="startSkip"></button>
+  <div class="report hidden" id="startReport"></div>
   <p class="fine build" id="buildTag"></p>
   <p class="fine hidden" id="warnStore">Storage is blocked in this browser, so progress will not survive a reload.</p>
 </div>
@@ -112,19 +113,15 @@
 <div class="veil hidden" id="over">
   <p id="overLead">The line broke.</p>
   <div class="figure" id="overWave">0</div>
-  <p>waves held · best <b id="overBest">0</b></p>
-  <div class="stats">
-    <div><b id="overScore">0</b><span>points this run</span></div>
-    <div><b id="overKills">0</b><span>kills</span></div>
-    <div><b id="overCores">0</b><span>cores banked</span></div>
-  </div>
+  <p>waves held · best <b id="overBest">0</b> · <b id="overCores">0</b> cores banked</p>
   <div class="veilRow">
     <button class="btn go big" id="btnAgain">Defend again</button>
+    <button class="btn go big hidden" id="btnAgainHead">Head start</button>
     <button class="btn big hidden" id="btnOverReplay">Replay this build</button>
     <button class="btn big" id="btnOverFoundry">Foundry</button>
   </div>
   <p class="armed hidden" id="overArmed"></p>
-  <button class="btn tiny hidden skipToggle" id="overSkip"></button>
+  <div class="report" id="overReport"></div>
 </div>
 
 <!-- the Foundry -->

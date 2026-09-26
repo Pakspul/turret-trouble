@@ -23,6 +23,13 @@ tower types.
 - **Foundry** spends banked points. It pauses the run while it is open.
 - **Blueprints** replays a build you have already worked out, so a run that
   ended badly does not have to be re-clicked from scratch.
+- **Menu** parks the run behind the title screen with a **run report**: kills
+  (and how many Head Start paid out), points scored, Cores minted, leaks,
+  damage and killing blows per tower type, and kills and leaks per enemy type.
+  The summary screen at game over shows the same report.
+- While a run is playing, the game holds a **screen wake lock** so a phone does
+  not dim and sleep mid-wave. The menu, the summary and a paused run release
+  it. (Browsers only grant it over HTTPS or on localhost.)
 
 Keyboard: `1`–`7` pick a tower, `space` sends a wave, `P` pauses, `F` opens the
 Foundry, `B` opens Blueprints, `Esc` clears the selection or closes whichever
@@ -97,7 +104,10 @@ what is left), and Overcharge adds crit damage once crit chance reaches 100%.
 - **Command** — Reinforced Core, Field Repair, Recon Uplink, Overdrive (4×,
   then +1× per rank up to 10×, steeply priced), Rapid Deployment (−1 s break
   per rank, down to none), Head Start (each rank skips ten more opening waves
-  and pays them out; needs wave 30, then 40, 50…), and Data Siphon.
+  and pays them out; needs wave 30, then 40, 50…). Once it is owned, the
+  start and summary screens offer two buttons — **wave 1** or **Head start**
+  — so every run is an explicit choice. Replaying a blueprint picks the same
+  opening the build was recorded on, and Data Siphon.
 
 Progress lives in `localStorage` under `turret-trouble:profile:v1`. "Reset
 progress" in the Foundry footer wipes it.

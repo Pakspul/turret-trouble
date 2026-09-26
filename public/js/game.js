@@ -31,6 +31,8 @@ export const S = {
   skipped: 0,
   /** Head Start points, held back until the first real wave is held. */
   heldPoints: 0,
+  /** Where this run's damage, kills and leaks went - see blankTally(). */
+  tally: null,
 
   // pacing
   phase: 'menu',        // menu | build | run | break | dead
@@ -71,8 +73,31 @@ export const S = {
 
 const touch = () => S.onChange();
 
+/**
+ * The per-run breakdown the menu and the summary screen show. Damage is the
+ * health a tower actually took off (overkill does not count), keyed by
+ * tower kind; kills and leaks are keyed by enemy type.
+ */
+function blankTally() {
+  return {
+    dmg: {},        // tower kind -> damage dealt
+    towerKills: {}, // tower kind -> killing blows
+    kills: {},      // enemy type -> killed in play
+    leaks: {},      // enemy type -> reached the exit
+    warps: 0,       // enemies a Portal sent back to the start
+    headKills: 0    // kills Head Start paid out without a fight
+  };
+}
+
+const bump = (bag, key, by = 1) => { bag[key] = (bag[key] || 0) + by; };
+
 /* ── lifecycle ────────────────────────────────────────────────────────── */
-export function newRun({ headStart: useHeadStart = true } = {}) {
+/**
+ * Start a fresh run. Head Start is only used when the caller asks for it,
+ * so every run opens where the player chose rather than on a remembered
+ * switch.
+ */
+export function newRun({ headStart: useHeadStart = false } = {}) {
   resetField();
   S.gold = meta.mods.startGold;
   S.score = 0;
@@ -94,7 +119,8 @@ export function newRun({ headStart: useHeadStart = true } = {}) {
   S.picked = null; S.selected = null; S.hover = -1;
   S.shake = 0; S.waveFlash = 0; S.warn = 0;
   S.heldPoints = 0;
-  S.skipped = useHeadStart && meta.headStartOn() ? meta.mods.skipWaves : 0;
+  S.tally = blankTally();
+  S.skipped = useHeadStart && meta.mods.skipWaves > 0 ? meta.mods.skipWaves : 0;
   if (S.skipped) headStart(S.skipped);
   // Starts a fresh tape, and hands the opening to the autopilot if a
   // blueprint has been armed.
@@ -124,6 +150,7 @@ function headStart(skip) {
   }
   S.gold += gold;
   S.kills += kills;
+  S.tally.headKills = kills;
   S.wave = skip;
   S.wavesCleared = skip;
   S.nextWave = buildWave(skip + 1);
@@ -215,7 +242,7 @@ function spawn(order) {
   const hp = Math.round(def.hp * order.hpMul);
   const row = def.fly ? 0.8 + Math.random() * (ROWS - 1.6) : SPAWN_R + 0.5;
   S.foes.push({
-    def, hp, max: hp,
+    type: order.type, def, hp, max: hp,
     spd: def.spd * order.spdMul,
     x: -0.7, y: row,
     cc: SPAWN, to: null,
@@ -264,6 +291,7 @@ function walk(e, dt) {
 
 function breach(e) {
   e.dead = true;
+  bump(S.tally.leaks, e.type);
   S.lives--;
   S.shake = 1;
   sfx.breach();
@@ -273,16 +301,20 @@ function breach(e) {
 }
 
 /* ── damage ───────────────────────────────────────────────────────────── */
-function hurt(e, dmg, pierce, colour, crit) {
+function hurt(e, dmg, pierce, colour, crit, src) {
   if (e.dead) return;
   const soak = Math.max(0, e.def.armor - (pierce || 0));
-  e.hp -= dmg * (1 - soak);
+  const dealt = dmg * (1 - soak);
+  if (src) bump(S.tally.dmg, src, Math.min(dealt, Math.max(0, e.hp)));
+  e.hp -= dealt;
   e.hit = crit ? 0.2 : 0.12;
   if (crit) note(px(e.x), py(e.y - 0.35), 'CRIT', '#ffe08a');
   if (e.hp > 0) return;
 
   e.dead = true;
   S.kills++;
+  bump(S.tally.kills, e.type);
+  if (src) bump(S.tally.towerKills, src);
   meta.noteKill();
 
   const gold = Math.round(e.def.gold * (1 + KILL_GOLD_GROWTH * S.wave) * meta.mods.killGold);
@@ -404,7 +436,7 @@ function tickTower(t, dt) {
       if (e.def.fly && !hitsAir) continue;
       if (Math.hypot(e.x - tx, e.y - ty) > st.range) continue;
       chill(e, st.slow, st.slowDur);
-      hurt(e, st.dmg, st.pierce, def.color, false);
+      hurt(e, st.dmg, st.pierce, def.color, false, t.k);
       touched++;
     }
     if (touched) { t.cd = st.rate; t.ring = 1; sfx.freeze(); }
@@ -421,7 +453,7 @@ function tickTower(t, dt) {
     t.focus = t.lock === target ? Math.min(2.2, t.focus + dt) : 0;
     t.lock = target;
     const ramp = 1 + (t.focus / 2.2) * st.ramp;
-    hurt(target, st.dps * ramp * meta.critAverage() * dt, st.pierce, def.color, false);
+    hurt(target, st.dps * ramp * meta.critAverage() * dt, st.pierce, def.color, false, t.k);
     return;
   }
 
@@ -461,7 +493,7 @@ function fireChain(t, st, first, tx, ty) {
   for (let jump = 0; jump < st.chains && current; jump++) {
     seen.add(current);
     points.push({ x: current.x, y: current.y });
-    hurt(current, damage, st.pierce, TOWERS.tesla.color, crit && jump === 0);
+    hurt(current, damage, st.pierce, TOWERS.tesla.color, crit && jump === 0, t.k);
     damage *= CHAIN_FALLOFF;
 
     let next = null, bestD = CHAIN_REACH;
@@ -479,6 +511,7 @@ function fireChain(t, st, first, tx, ty) {
 
 /** Drop a foe back at the entrance, as if it had just spawned. */
 function sendHome(e, colour, tx, ty) {
+  S.tally.warps++;
   S.warps.push({ x: e.x, y: e.y, fx: tx, fy: ty, t: 0.5, col: colour });
   // Flyers keep their lane; walkers go back to the entry cell and re-path.
   e.x = -0.7;
@@ -532,12 +565,12 @@ function tickShot(s, dt) {
       if (e.dead || (e.def.fly && !s.air)) continue;
       const dd = Math.hypot(e.x - s.x, e.y - s.y);
       if (dd <= s.splash) {
-        hurt(e, s.dmg * mult * (1 - 0.45 * (dd / s.splash)), s.pierce, s.col, s.crit);
+        hurt(e, s.dmg * mult * (1 - 0.45 * (dd / s.splash)), s.pierce, s.col, s.crit, s.k);
       }
     }
     sfx.blast();
   } else if (alive) {
-    hurt(target, s.dmg * mult, s.pierce, s.col, s.crit);
+    hurt(target, s.dmg * mult, s.pierce, s.col, s.crit, s.k);
   }
   return false;
 }

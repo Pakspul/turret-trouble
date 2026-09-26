@@ -485,8 +485,71 @@ button { font: inherit; }
 /* ── the blueprint sheet ──────────────────────────────────────────────── */
 .veil p.armed { color: var(--good); font-size: 12px; }
 .veil p.build { color: var(--dim); font-size: 11px; letter-spacing: .04em; }
-.veil .skipToggle { margin-top: 8px; opacity: .7; }
-.veil .skipToggle.on { color: var(--good); opacity: 1; }
+
+/* ── the run report: menu and summary screen ─────────────────────────── */
+.report {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(100%, 760px);
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.report .stats { flex-wrap: wrap; justify-content: center; gap: 8px 20px; }
+.report .tables {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+}
+.report section { flex: 1 1 300px; min-width: 0; text-align: left; }
+.report h3 {
+  margin: 0 0 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.report table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.report th {
+  font-weight: 500;
+  font-size: 10px;
+  color: var(--dim);
+  text-align: right;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.report td { text-align: right; padding: 3px 6px; white-space: nowrap; }
+.report th:first-child, .report td.nm { text-align: left; }
+.report td.nm i {
+  display: inline-block;
+  width: 8px; height: 8px;
+  margin-right: 6px;
+  border-radius: 2px;
+  background: var(--c);
+}
+.report td.bar { position: relative; width: 40%; }
+.report td.bar span {
+  position: absolute;
+  left: 6px; top: 4px; bottom: 4px;
+  max-width: calc(100% - 12px);
+  background: var(--c);
+  opacity: .22;
+  border-radius: 2px;
+}
+.report td.bar em { position: relative; font-style: normal; }
+.report td.bad { color: var(--bad); }
+.report p.empty { font-size: 12px; }
 
 #tList { display: flex; flex-direction: column; gap: 8px; }
 
