@@ -75,13 +75,14 @@ function valueNoise(rand, scale) {
 /** Share of the map below each threshold: water, low ground, hills. */
 const QUANTILES = [0.10, 0.48, 0.80];
 const MAX_ATTEMPTS = 12;
-/** Radius of the flat pad each HQ sits on. */
-const PAD = 4.5;
+/** Radius of the flat pad each Commander starts on: room for a Factory,
+    its Helpers and a first ring of towers. */
+const PAD = 6.5;
 
 /**
  * Build the map for `seed`. Returns
  *   { seed, height: Int8Array, ramp: Uint8Array, hq, enemy, links, quality }
- * where `hq` and `enemy` are the centre cells of the two 3x3 bases.
+ * where `hq` and `enemy` are the cells the two Commanders start on.
  */
 export function generate(seed) {
   let best = null;
@@ -118,9 +119,9 @@ function attemptMap(seed) {
   despeckle(height);
 
   // Bases sit near the short edges, somewhere in the middle band.
-  const band = () => 7 + Math.floor(rand() * (MAP_H - 14));
-  const hq = { x: 4, y: band() };
-  const enemy = { x: MAP_W - 5, y: band() };
+  const band = () => 9 + Math.floor(rand() * (MAP_H - 18));
+  const hq = { x: 7, y: band() };
+  const enemy = { x: MAP_W - 8, y: band() };
   flatten(height, hq);
   flatten(height, enemy);
 
@@ -154,7 +155,7 @@ function despeckle(height) {
   }
 }
 
-/** Level the ground under and around an HQ, and never let it be water. */
+/** Level the ground around a start, and never let it be water. */
 function flatten(height, base) {
   const counts = [0, 0, 0];
   for (let y = -3; y <= 3; y++) {
@@ -164,8 +165,8 @@ function flatten(height, base) {
     }
   }
   const level = counts[1] >= counts[0] && counts[1] >= counts[2] ? 1 : counts[0] >= counts[2] ? 0 : 2;
-  for (let y = -5; y <= 5; y++) {
-    for (let x = -5; x <= 5; x++) {
+  for (let y = -7; y <= 7; y++) {
+    for (let x = -7; x <= 7; x++) {
       if (!inside(base.x + x, base.y + y) || Math.hypot(x, y) > PAD) continue;
       height[at(base.x + x, base.y + y)] = level;
     }

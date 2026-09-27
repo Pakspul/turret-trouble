@@ -1,7 +1,8 @@
-/* Headless Frontier test: terrain, routing, fire-back, units, victory.
+/* Headless Frontier test: terrain, the Commander, Factories and Helpers,
+   build sequences, route stability, the enemy AI, and annihilation.
    Drives the simulation with no DOM, like smoke.mjs.
 
-   usage: node test/frontier.mjs [--probe]   (--probe prints a sortie log) */
+   usage: node test/frontier.mjs [--probe]   (--probe plays scripted sorties) */
 const mem = new Map();
 globalThis.window = {
   localStorage: {
@@ -19,10 +20,53 @@ const fr = await import('../public/js/frontier.js');
 
 const { S } = game;
 const { F } = fr;
+const { at, colOf, rowOf } = terrain;
 const PROBE = process.argv.includes('--probe');
+const DT = 1 / 60;
 
 function assert(cond, msg) {
   if (!cond) { console.error('ASSERT FAILED:', msg); process.exitCode = 1; }
+}
+const run = secs => { for (let f = 0; f < secs * 60 && S.phase !== 'dead'; f++) fr.update(DT); };
+const mine = type => F.structs.filter(s => s.side === 0 && s.type === type);
+
+/** Park the enemy so a test can watch one thing happen in peace. */
+function quietEnemy() {
+  F.ai.think = Infinity;
+  F.ai.gold = 0;
+}
+
+/** First cell near (x, y), within r, where `key` may go. */
+function spotNear(x, y, key, r0 = 0, r1 = 8) {
+  for (let r = r0; r <= r1; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const cx = Math.floor(x) + dx, cy = Math.floor(y) + dy;
+        if (cx < 0 || cy < 0 || cx >= cfg.MAP_W || cy >= cfg.MAP_H) continue;
+        if (fr.canBuild(at(cx, cy), key)) return at(cx, cy);
+      }
+    }
+  }
+  return -1;
+}
+
+/** Steer your Commander with the stick until it stands within `d` of p,
+    the way a thumb would: along the road, around Factories. */
+function walkTo(p, d = 1, secs = 60) {
+  const c = F.cmd[0];
+  const goal = at(Math.floor(p.x), Math.floor(p.y));
+  const solid = i => !!F.grid[i] && F.grid[i].type === 'fab';
+  const road = terrain.flowField(F.map, [goal], i => (solid(i) ? Infinity : 0));
+  for (let f = 0; f < secs * 60 && S.phase !== 'dead'; f++) {
+    if (Math.hypot(p.x - c.x, p.y - c.y) <= d) break;
+    const n = road.next[c.cc];
+    const tx = n >= 0 ? colOf(n) + 0.5 : p.x, ty = n >= 0 ? rowOf(n) + 0.5 : p.y;
+    const dx = tx - c.x, dy = ty - c.y, len = Math.hypot(dx, dy) || 1;
+    F.stick.x = dx / len; F.stick.y = dy / len;
+    fr.update(DT);
+  }
+  F.stick.x = F.stick.y = 0;
 }
 
 meta.init();
@@ -32,153 +76,218 @@ const a = terrain.generate(terrain.sectorSeed(4));
 const b = terrain.generate(terrain.sectorSeed(4));
 assert(a.height.every((h, i) => h === b.height[i]) && a.ramp.every((r, i) => r === b.ramp[i]),
   'the same seed must give the same map');
-const c = terrain.generate(terrain.sectorSeed(5));
-assert(!a.height.every((h, i) => h === c.height[i]), 'different sectors should differ');
-
+const c5 = terrain.generate(terrain.sectorSeed(5));
+assert(!a.height.every((h, i) => h === c5.height[i]), 'different sectors should differ');
 for (let s = 1; s <= 25; s++) {
   const m = terrain.generate(terrain.sectorSeed(s));
-  const flow = terrain.flowField(m, [terrain.at(m.hq.x, m.hq.y)], () => 0);
-  assert(flow.dist[terrain.at(m.enemy.x, m.enemy.y)] < Infinity, `sector ${s}: the bases must connect`);
-  assert(m.height[terrain.at(m.hq.x, m.hq.y)] >= 0, `sector ${s}: HQ must stand on land`);
+  const flow = terrain.flowField(m, [at(m.hq.x, m.hq.y)], () => 0);
+  assert(flow.dist[at(m.enemy.x, m.enemy.y)] < Infinity, `sector ${s}: the starts must connect`);
+  assert(m.height[at(m.hq.x, m.hq.y)] >= 0 && m.height[at(m.enemy.x, m.enemy.y)] >= 0, `sector ${s}: both starts on land`);
 }
 
 /* ── 2. a sortie opens ───────────────────────────────────────── */
 fr.newSortie(1);
 assert(S.mode === 'frontier', 'mode should switch to frontier');
-assert(S.phase === 'build', 'a sortie opens in the build phase');
-assert(F.hq.hp === meta.mods.integrity, 'HQ starts at full integrity');
-assert(F.bunkers.length === cfg.bunkerCount(1), `sector 1 should have ${cfg.bunkerCount(1)} bunkers, got ${F.bunkers.length}`);
-assert(S.gold > meta.mods.startGold, 'a sortie opens with the gold of the waves it skips');
-const spawnCell = terrain.at(F.enemy.cx - 2, F.enemy.cy);
-assert(F.flow.cautious.dist.some(d => d > 20 && d < Infinity), 'enemies should have a route home');
+assert(S.phase === 'run', 'Frontier has no waves: the war runs from the start');
+assert(F.cmd[0] && F.cmd[1] && F.cmd[0].side === 0 && F.cmd[1].side === 1, 'two Commanders, one per side');
+assert(F.cmd[0].hp === F.cmd[0].max && F.cmd[0].max > 0, 'your Commander starts whole');
+assert(F.structs.length === 0 && F.units.length === 0, 'nothing is built at the start');
+assert(S.gold > meta.mods.startGold, 'a sortie opens with a war chest');
+const g0 = S.gold;
+run(10);
+assert(S.gold > g0, 'income trickles in');
 
 /* ── 3. build rules ──────────────────────────────────────────── */
-const m = F.map;
-const near = [];
-for (let y = -4; y <= 4; y++) for (let x = -4; x <= 4; x++) {
-  const i = terrain.at(F.hq.cx + x, F.hq.cy + y);
-  if (fr.canBuild(i)) near.push(i);
-}
-assert(near.length > 10, `there should be room to build by the HQ, found ${near.length}`);
-const far = terrain.at(F.enemy.cx - 3, F.enemy.cy);
-assert(!fr.canBuild(far), 'no building next to the enemy base');
-const water = m.height.findIndex(h => h < 0);
-if (water >= 0) assert(fr.whyNot(water) !== '', 'no building on water');
-
+fr.newSortie(1);
+quietEnemy();
 S.gold = 1e6;
+const me = F.cmd[0];
+const fabCell = spotNear(me.x + 3, me.y, 'fab');
+assert(fabCell >= 0, 'there is room for a Factory beside the start');
+assert(fr.place(fabCell, 'fab'), 'a Factory can be ordered');
+const fab = F.grid[fabCell];
+assert(fab.type === 'fab' && fab.cells.length === 9 && !fab.done, 'a Factory is a 3x3 construction site');
+assert(fab.cells.every(i => F.grid[i] === fab), 'it fills all nine cells');
+assert(!fr.place(fabCell, 'fab'), 'no stacking');
+const close = at(fab.cx + 3, fab.cy);
+assert(fr.whyNot(close, 'fab') !== '', 'Factories keep their distance');
+const ring = fr.ringOf(fab);
+assert(ring.length === 12, `a Factory has twelve Helper slots, got ${ring.length}`);
+const outside = at(fab.cx + 2, fab.cy + 2);
+assert(fr.whyNot(outside, 'helper') !== '', 'the ring corners take no Helper');
+const far = spotNear(me.x + 12, me.y, 'gun');
+assert(fr.whyNot(far, 'helper') !== '', 'Helpers only go beside a Factory');
+const water = F.map.height.findIndex(h => h < 0);
+if (water >= 0) assert(fr.whyNot(water, 'gun') !== '', 'no building on water');
+
+// Cancelling a site gives everything back.
 const purse = S.gold;
-assert(fr.place(near[0], 'gun'), 'should place a gun by the HQ');
-assert(!fr.place(near[0], 'gun'), 'no stacking');
-const g1 = F.grid[near[0]];
-assert(g1.hp > 0 && g1.hp === g1.max, 'a tower starts at full health');
-assert(fr.buildCost('gun') > cfg.TOWERS.gun.cost, 'escalation applies in Frontier too');
-const hp0 = g1.max;
-fr.upgrade(g1);
-assert(g1.l === 1 && g1.max > hp0, 'upgrades work and harden the tower');
-fr.sell(g1);
-assert(S.gold === purse, `sell refunds everything (${S.gold} vs ${purse})`);
+const gunCell = spotNear(me.x, me.y - 3, 'gun');
+fr.place(gunCell, 'gun');
+fr.recycle(F.grid[gunCell]);
+assert(S.gold === purse && !F.grid[gunCell], 'a cancelled order is refunded in full');
 
-/* high ground reaches further */
-const hi = F.towers.length === 0 && near.find(i => m.height[i] > 0);
-if (hi) {
-  fr.place(hi, 'gun');
-  const t = F.grid[hi];
-  assert(fr.rangeOf(t) > game.statsOf(t).range, 'towers on high ground get extra range');
-  fr.sell(t);
+/* ── 4. the Commander builds only what it can reach ──────────── */
+const remote = spotNear(me.x + 14, me.y, 'gun', 0, 6);
+fr.place(remote, 'gun');
+const outpost = F.grid[remote];
+run(cfg.FAB.bt / meta.mods.buildPower + 1);
+assert(fab.done, 'the Factory beside the Commander gets built');
+assert(!outpost.done && outpost.prog === 0, 'an order out of reach waits for the Commander');
+walkTo(outpost, meta.mods.buildReach - 0.5);
+run(5);
+assert(outpost.done, 'walking over finishes it');
+assert(fr.alive(outpost), 'a finished tower is a live tower');
+const hp0 = outpost.max;
+fr.upgrade(outpost);
+assert(outpost.l === 1 && outpost.max > hp0, 'tower upgrades work and harden the tower');
+walkTo({ x: fab.x - 2.5, y: fab.y }, 0.8);
+
+/* ── 5. Factories: sequences, Helpers, tiers ─────────────────── */
+assert(fab.seq.length === 1 && fab.seq[0] === 'trooper', 'a new Factory makes Troopers until told otherwise');
+fr.seqClear(fab);
+fr.seqAdd(fab, 'striker');
+fr.seqAdd(fab, 'breaker');
+fr.seqAdd(fab, 'striker');
+// Whatever was already on the belt finishes first; then the sequence runs.
+const known = new Set(F.units);
+let skip = fab.job ? 1 : 0;
+const made = [];
+for (let f = 0; f < 60 * 60 && made.length < 4; f++) {
+  fr.update(DT);
+  for (const u of F.units) {
+    if (known.has(u)) continue;
+    known.add(u);
+    if (skip) skip--;
+    else made.push(u.k);
+  }
 }
+assert(made.join(',') === 'striker,breaker,striker,striker', `a sequence is built in order and repeats, got ${made}`);
+for (let n = 0; n < cfg.SEQ_MAX + 2; n++) fr.seqAdd(fab, 'trooper');
+assert(fab.seq.length === cfg.SEQ_MAX, 'a sequence has a length limit');
 
-/* ── 4. walkers avoid kill zones when they can ───────────────── */
+const slow = fr.fabSpeed(fab);
+for (const i of ring.slice(0, 4)) fr.place(i, 'helper');
+run(25);
+assert(fr.helpersOf(fab) === 4, `four Helpers get built, got ${fr.helpersOf(fab)}`);
+assert(Math.abs(fr.fabSpeed(fab) - (slow + 4 * cfg.HELPER_BOOST)) < 1e-9, 'each Helper adds its boost');
+
+fr.seqClear(fab);
+fr.seqAdd(fab, 'trooper');
+run(6);
+const t1 = F.units.filter(u => u.k === 'trooper' && u.tier === 1).pop();
+fr.upgradeFab(fab);
+assert(fab.up, 'an upgrade starts');
+run(cfg.fabUpTime(1) / fr.fabSpeed(fab) + 0.5);
+assert(fab.tier === 2 && !fab.up, 'the upgrade finishes into tier 2');
+run(cfg.unitTime('trooper', 2) / fr.fabSpeed(fab) + 0.5);
+const t2 = F.units.filter(u => u.k === 'trooper' && u.tier === 2).pop();
+assert(t1 && t2 && t2.max > t1.max * 1.5, 'tier 2 units are much stronger');
+
+/* ── 6. groups wait at the door, then march together ─────────── */
+fr.setGroup(fab, 3);
+const waiting = () => F.units.filter(u => u.hold === fab).length;
+let seen = 0;
+for (let f = 0; f < 60 * 30 && seen < 2; f++) { fr.update(DT); seen = Math.max(seen, waiting()); }
+assert(seen === 2, `units hold until the group is complete (saw ${seen} waiting)`);
+for (let f = 0; f < 60 * 30 && waiting(); f++) fr.update(DT);
+assert(waiting() === 0 && fab.held.length === 0, 'the third unit sends the group off');
+fr.setGroup(fab, 1);
+
+/* ── 7. routes hold still while things move ───────────────────── */
+fr.newSortie(2);
+quietEnemy();
+S.gold = 1e6;
+fr.place(spotNear(F.cmd[0].x + 3, F.cmd[0].y, 'fab'), 'fab');
+run(20);
+const rev = F.flowRev;
+walkTo({ x: F.cmd[0].x, y: F.cmd[0].y + 3 }, 0.5);
+walkTo({ x: F.cmd[0].x + 2, y: F.cmd[0].y - 3 }, 0.5);
+run(2);
+assert(F.flowRev === rev, 'moving Commanders do not re-plan the routes while buildings stand');
+const road = F.flow[0].bold.next.slice();
+F.cmd[1].x -= 1; F.cmd[1].y += 1;
+run(1);
+assert(F.flow[0].bold.next.every((n, i) => n === road[i]), 'the attack route ignores the enemy Commander while it has buildings');
+
+/* ── 8. the enemy builds a base and fields an army ───────────── */
+fr.newSortie(1);
+let enemyUnits = 0;
+for (let f = 0; f < 60 * 180; f++) { fr.update(DT); enemyUnits = Math.max(enemyUnits, fr.armySize(1)); }
+const theirs = F.structs.filter(s => s.side === 1);
+assert(theirs.some(s => s.type === 'fab' && s.done), 'the enemy builds a Factory');
+assert(theirs.some(s => s.type === 'helper'), 'and Helpers for it');
+assert(theirs.some(s => s.type === 'tower'), 'and towers');
+assert(enemyUnits >= 4, `and fields units (${enemyUnits})`);
+
+/* ── 9. marching units do not dither ──────────────────────────── */
+// Units on the road should keep their heading; a reversal is a column
+// that could not make up its mind.
 fr.newSortie(1);
 S.gold = 1e6;
-const route = () => {
-  const out = [];
-  let u = spawnCell, guard = 0;
-  while (u !== -1 && guard++ < 4000) { out.push(u); u = F.flow.cautious.next[u]; }
-  return out;
-};
-const r0 = route();
-// Park a line of Guns across the middle of the cautious road.
-const mid = r0[Math.floor(r0.length * 0.8)];
-F.reach.fill(1);
-let built = 0;
-for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) {
-  const i = terrain.at(terrain.colOf(mid) + x, terrain.rowOf(mid) + y);
-  if (fr.whyNot(i) === '' && fr.place(i, 'gun')) { built++; F.reach.fill(1); }
+fr.place(spotNear(F.cmd[0].x + 3, F.cmd[0].y, 'fab'), 'fab');
+run(16);
+const f9 = mine('fab')[0];
+fr.seqClear(f9);
+for (const k of ['trooper', 'breaker', 'striker', 'trooper']) fr.seqAdd(f9, k);
+let reversals = 0, steps = 0;
+const last = new Map();
+for (let f = 0; f < 60 * 120 && S.phase !== 'dead'; f++) {
+  fr.update(DT);
+  if (f % 30) continue;
+  for (const u of F.units) {
+    if (u.side || u.tgt || u.hold) { last.delete(u); continue; }
+    const p = last.get(u);
+    last.set(u, { x: u.x, y: u.y, vx: p ? u.x - p.x : 0, vy: p ? u.y - p.y : 0 });
+    if (!p || Math.hypot(p.vx, p.vy) < 0.1) continue;
+    const vx = u.x - p.x, vy = u.y - p.y;
+    if (Math.hypot(vx, vy) < 0.1) continue;
+    steps++;
+    const cos = (vx * p.vx + vy * p.vy) / (Math.hypot(vx, vy) * Math.hypot(p.vx, p.vy));
+    if (cos < -0.5) reversals++;
+  }
 }
-assert(built > 0, 'should be able to build on the road');
-const bold = F.flow.bold.dist[spawnCell], cautious = F.flow.cautious.dist[spawnCell];
-assert(cautious >= bold, 'the cautious plan prices in the kill zone');
+assert(steps > 50, `units should have marched (${steps} samples)`);
+assert(reversals / Math.max(1, steps) < 0.03, `marching units should rarely turn back (${reversals}/${steps})`);
+console.log(`route steadiness: ${reversals} reversals in ${steps} half-second samples of marching units`);
 
-/* ── 5. enemies shoot back and towers can fall ───────────────── */
-fr.newSortie(2);
-S.gold = 1e6;
-F.hq.hp = F.hq.max = S.lives = S.maxLives = 1e9;
-F.reach.fill(1);
-const post = near.find(i => fr.canBuild(i));
-fr.place(post, 'gun');
-const gunPost = F.grid[post];
-// A column of tanks, dropped right beside it.
-fr.startWave();
-S.queue = Array.from({ length: 6 }, (_, k) => ({ type: 'tank', at: k * 0.1, hpMul: 50, spdMul: 1, arms: 5 }));
-for (let f = 0; f < 60; f++) fr.update(1 / 60);
-for (const e of S.foes) { e.x = gunPost.x + 1.5; e.y = gunPost.y; }
-for (let f = 0; f < 60 * 30 && fr.alive(gunPost); f++) fr.update(1 / 60);
-assert(S.tally.towersLost > 0, 'tanks in range should shoot a tower down');
-assert(!F.grid[post], 'a destroyed tower leaves the grid');
-assert(!F.towers.includes(gunPost), 'and the tower list');
+/* ── 10. an idle player is annihilated ───────────────────────── */
+fr.newSortie(1);
+for (let f = 0; f < 60 * 60 * 20 && S.phase !== 'dead'; f++) fr.update(DT);
+assert(F.result === 'lost', `doing nothing should lose (result ${F.result}, ${Math.round(F.time)} s)`);
 
-/* ── 6. units march, fight, and can raze the base ────────────── */
+/* ── 11. a strong army annihilates the enemy ─────────────────── */
 fr.newSortie(1);
 S.gold = 1e7;
-F.hq.hp = F.hq.max = S.lives = S.maxLives = 1e9;
-for (let k = 0; k < 6; k++) fr.recruit('trooper');
-for (let k = 0; k < 3; k++) fr.recruit('breaker');
-for (let k = 0; k < 3; k++) fr.recruit('striker');
-assert(fr.squadSize() === 12, 'squad should queue 12');
-const refund = S.gold;
-fr.disband();
-assert(fr.squadSize() === 0 && S.gold > refund, 'disbanding refunds the squad');
-for (let k = 0; k < 6; k++) fr.recruit('trooper');
-for (let k = 0; k < 4; k++) fr.recruit('breaker');
-for (let k = 0; k < 4; k++) fr.recruit('striker');
-for (let k = 0; k < 4; k++) fr.upgradeArmory();
-fr.startWave();
-assert(F.units.length === 14 && fr.squadSize() === 0, 'sending a wave deploys the squad');
-const hq0 = F.enemy.hp;
-let frames = 0;
-while (S.phase !== 'dead' && frames < 60 * 60 * 15) {
-  if (S.phase === 'build' || S.phase === 'break') {
-    for (let k = 0; k < 4; k++) fr.recruit('breaker');
-    for (let k = 0; k < 4; k++) fr.recruit('trooper');
-    fr.startWave();
-  }
-  fr.update(1 / 60);
-  frames++;
+F.cmd[0].hp = F.cmd[0].max = 1e9;
+const c11 = F.cmd[0];
+for (const dy of [-5, 5]) fr.place(spotNear(c11.x + 3, c11.y + dy, 'fab', 0, 6), 'fab');
+run(30);
+for (const f of mine('fab')) {
+  for (const i of fr.ringOf(f)) fr.place(i, 'helper');
 }
-assert(F.enemy.hp < hq0, 'units should damage the enemy HQ');
-assert(S.tally.unitKills > 0, 'units should kill enemies on the way');
-assert(F.result === 'won', `a strong enough army should raze sector 1 (result ${F.result}, HQ ${Math.round(F.enemy.hp)}/${F.enemy.max}, wave ${S.wave})`);
-assert(meta.profile.frontier.cleared >= 1, 'a razed sector is recorded');
-assert(F.bounty > 0, 'razing pays a bounty');
-console.log(`sector 1 razed on wave ${S.wave} after ${(frames / 60).toFixed(0)} s · sent ${S.tally.unitsSent}, lost ${S.tally.unitsLost}, unit kills ${S.tally.unitKills}, bounty ${F.bounty}`);
-
-/* ── 7. an undefended HQ falls ───────────────────────────────── */
-fr.newSortie(3);
-frames = 0;
-while (S.phase !== 'dead' && frames < 60 * 60 * 20) {
-  if (S.phase === 'build' || S.phase === 'break') fr.startWave();
-  fr.update(1 / 60);
-  frames++;
+run(50);
+for (const f of mine('fab')) {
+  for (let k = 0; k < 3; k++) { f.up = null; f.tier++; }
+  fr.seqClear(f);
+  for (const k of ['breaker', 'trooper', 'breaker', 'gunship']) fr.seqAdd(f, k);
 }
-assert(F.result === 'lost', 'with no defence the HQ should fall');
-assert(Object.values(S.tally.leaks).reduce((x, y) => x + y, 0) > 0, 'leaks are counted');
+const razed0 = S.tally.razed;
+for (let f = 0; f < 60 * 60 * 15 && S.phase !== 'dead'; f++) fr.update(DT);
+assert(S.tally.razed > razed0, 'units raze enemy buildings');
+assert(S.kills > 0, 'units kill enemy units');
+assert(F.result === 'won', `a strong enough army should annihilate sector 1 (result ${F.result}, ${Math.round(F.time)} s)`);
+assert(F.cmd[1].dead && !F.structs.some(s => s.side === 1), 'annihilation means the Commander and every building');
+assert(meta.profile.frontier.cleared >= 1, 'a won sector is recorded');
+assert(F.bounty > 0, 'winning pays a bounty');
+console.log(`sector 1 annihilated in ${Math.round(F.time)} s · built ${Object.values(S.tally.built).reduce((x, y) => x + y, 0)} units, lost ${Object.values(S.tally.lost).reduce((x, y) => x + y, 0)}, razed ${S.tally.razed}, bounty ${F.bounty}`);
 
-/* ── 8. Holdout is untouched by a sortie ─────────────────────── */
+/* ── 12. Holdout is untouched by a sortie ────────────────────── */
 game.newRun();
 assert(S.mode === 'holdout', 'a Holdout run switches the mode back');
 assert(S.gold === meta.mods.startGold, 'Holdout opens with its own start gold');
 
-/* ── probe: a scripted, reasonably played sortie ─────────────── */
+/* ── probe: a scripted, middling player across sectors ───────── */
 if (PROBE) {
   // Somebody who has just held wave 100: roughly half the Foundry bought.
   meta.profile.stats.bestWave = 100;
@@ -189,37 +298,50 @@ if (PROBE) {
       for (let n = 0; n < want; n++) meta.buy(node.id);
     }
   }
-  for (const sector of [1, 3, 6, 10]) {
+  for (const sector of [1, 2, 3, 4, 6, 8]) {
     fr.newSortie(sector);
-    const spots = [];
-    for (let r = 1; r < 12 && spots.length < 400; r++) {
-      for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) {
-        if (Math.max(Math.abs(x), Math.abs(y)) !== r) continue;
-        const cx = F.hq.cx + x, cy = F.hq.cy + y;
-        if (cx < 0 || cy < 0 || cx >= cfg.MAP_W || cy >= cfg.MAP_H) continue;
-        spots.push(terrain.at(cx, cy));
-      }
-    }
+    const c = F.cmd[0];
+    const home = { x: c.x, y: c.y };
+    const dir = Math.sign(F.cmd[1].x - c.x);
     let f = 0;
-    const kinds = ['gun', 'rocket', 'laser'];
-    while (S.phase !== 'dead' && f < 60 * 60 * 40) {
-      if (S.phase === 'build' || S.phase === 'break') {
-        // Spend half on towers, half on units.
-        let guard = 0;
-        while (S.gold > 400 && guard++ < 40) {
-          const k = kinds[guard % 3];
-          const cell = spots.find(i => fr.canBuild(i));
-          if (guard % 2 && cell !== undefined && S.gold > fr.buildCost(k)) fr.place(cell, k);
-          else if (S.gold > fr.unitPrice('breaker')) { fr.recruit('breaker'); fr.recruit('trooper'); }
-          else break;
+    while (S.phase !== 'dead' && f < 60 * 60 * 25) {
+      if (f % 60 === 0 && !c.dead) {
+        const fabs = mine('fab'), nf = fabs.length;
+        if (!fr.sitesOf(0).length) {
+          if (nf === 0 || (F.time > 150 * nf && nf < 3 && S.gold > fr.buildCost('fab'))) {
+            const cell = spotNear(home.x + dir * 3 * (nf + 1), home.y + (nf % 2 ? 4 : -2), 'fab', 0, 6);
+            if (cell >= 0) fr.place(cell, 'fab');
+          } else if (S.gold > 120) {
+            const towers = mine('tower').length;
+            if (mine('helper').length < nf * (F.time < 240 ? 4 : 8)) {
+              for (const fb of fabs) {
+                const slot = fr.ringOf(fb).find(i => fr.canBuild(i, 'helper'));
+                if (slot !== undefined) { fr.place(slot, 'helper'); break; }
+              }
+            } else if (towers < 3 + F.time / 90) {
+              const cell = spotNear(home.x + dir * 6, home.y, ['gun', 'rocket', 'laser'][towers % 3], 1, 5);
+              if (cell >= 0) fr.place(cell, ['gun', 'rocket', 'laser'][towers % 3]);
+            }
+          }
         }
-        console.log(`  s${sector} w${S.wave} gold ${S.gold} towers ${F.towers.length} units ${F.units.length}+${fr.squadSize()} hq ${Math.round(F.hq.hp)} enemyHQ ${Math.round(100 * F.enemy.hp / F.enemy.max)}% bunkers ${F.bunkers.filter(b => !b.dead).length} lost ${S.tally.towersLost}t/${S.tally.unitsLost}u`);
-        fr.startWave();
+        for (const fb of fabs) {
+          if (fb.done && fb.seq.length === 1) { fr.seqAdd(fb, 'trooper'); fr.seqAdd(fb, 'breaker'); fr.setGroup(fb, 6); }
+          if (fb.done && !fb.up && S.gold > fr.fabUpgradeCost(fb) + 300) fr.upgradeFab(fb);
+        }
       }
-      fr.update(1 / 60);
+      const site = fr.sitesOf(0)[0];
+      const goal = site || home;
+      const dx = goal.x - c.x, dy = goal.y - c.y, d = Math.hypot(dx, dy);
+      const stop = site ? meta.mods.buildReach - 0.5 + site.half : 1;
+      F.stick.x = d > stop ? dx / d : 0; F.stick.y = d > stop ? dy / d : 0;
+      fr.update(DT);
       f++;
+      if (f % (60 * 60) === 0) {
+        const e = F.structs.filter(s => s.side === 1);
+        console.log(`  s${sector} ${Math.round(F.time / 60)}m gold ${S.gold}/${Math.round(F.ai.gold)} factories ${mine('fab').map(s => 'T' + s.tier).join(',')} vs ${e.filter(s => s.type === 'fab').map(s => 'T' + s.tier).join(',')} · towers ${mine('tower').length}/${e.filter(s => s.type === 'tower').length} · units ${fr.armySize(0)}/${fr.armySize(1)} · commanders ${Math.round(c.hp)}/${Math.round(F.cmd[1].hp)}`);
+      }
     }
-    console.log(`sector ${sector}: ${F.result} on wave ${S.wave}`);
+    console.log(`sector ${sector}: ${F.result || 'undecided'} after ${Math.round(F.time)} s`);
   }
 }
 
